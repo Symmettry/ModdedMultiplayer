@@ -1,0 +1,69 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+[[patches]]
+[patches.pattern]
+target = "functions/state_events.lua"
+pattern = '''
+            if game_over then
+                G.STATE = G.STATES.GAME_OVER
+                if not G.GAME.won and not G.GAME.seeded and not G.GAME.challenge then 
+                    G.PROFILES[G.SETTINGS.profile].high_scores.current_streak.amt = 0
+                end
+                G:save_settings()
+                G.FILE_HANDLER.force = true
+                G.STATE_COMPLETE = false
+            else
+'''
+position = "at"
+payload = '''
+if game_over then
+    local mp_valid = MP
+        and not MP.SINGLEPLAYER
+        and MP.CONN
+        and G
+        and G.GAME
+        and G.GAME.blind
+
+    if mp_valid then
+        if G.GAME.blind.boss
+            and G.GAME.round_resets
+            and G.GAME.round_resets.ante >= 2 then
+
+            print("[MP] Prevented boss death")
+            MP.on_boss_failed_round()
+            G.STATE_COMPLETE = false
+            G.STATE = G.STATES.SELECTING_HAND
+            return true
+        else
+            MP.CONN:take_life()
+            G.GAME.lives = G.GAME.lives - 1
+
+            if G.GAME.lives <= 0 then
+                G.STATE = G.STATES.GAME_OVER
+                if not G.GAME.won and not G.GAME.seeded and not G.GAME.challenge then 
+                    G.PROFILES[G.SETTINGS.profile].high_scores.current_streak.amt = 0
+                end
+                G:save_settings()
+                G.FILE_HANDLER.force = true
+                G.STATE_COMPLETE = false
+            else
+                G.GAME.blind.chips = 1
+                MP.force_end_round()
+                return
+            end
+        end
+    else
+        G.STATE = G.STATES.GAME_OVER
+        if not G.GAME.won and not G.GAME.seeded and not G.GAME.challenge then 
+            G.PROFILES[G.SETTINGS.profile].high_scores.current_streak.amt = 0
+        end
+        G:save_settings()
+        G.FILE_HANDLER.force = true
+        G.STATE_COMPLETE = false
+    end
+else
+'''
+match_indent = true

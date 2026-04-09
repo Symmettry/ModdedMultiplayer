@@ -1,0 +1,14 @@
+{
+    "id": "modmulti",
+    "name": "Modded Multiplayer",
+    "display_name": "Multiplayer",
+    "author": ["lily"],
+    "description": "My own custom multiplayer mod that will support ultra-modded gameplay",
+    "prefix": "modmulti",
+    "main_file": "main.lua",
+    "priority": 1e1024,
+    "badge_colour": "AA0000",
+    "badge_text_colour": "ffffff",
+    "version": "0.0.1a",
+    "dependencies": ["Steamodded (>=1.0.0~BETA-1531zeebee)", "Amulet"]
+}

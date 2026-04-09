@@ -1,0 +1,39 @@
+[manifest]
+version = "1.0.0"
+priority = 10
+
+[[patches]]
+[patches.regex]
+target = "functions/common_events.lua"
+pattern = "function get_new_boss\\(\\)"
+position = "after"
+payload = '''
+    if MP and not MP.SINGLEPLAYER
+    and G.GAME and G.GAME.round_resets
+    and G.GAME.round_resets.ante
+    and G.GAME.round_resets.ante >= 2 then
+        return 'bl_modmulti_opponent_blind'
+    end
+'''
+
+[[patches]]
+[patches.regex]
+target = "functions/UI_definitions.lua"
+pattern = "\\{n=G\\.UIT\\.T, config=\\{ref_table = G\\.GAME\\.round_resets\\.loc_blind_states, ref_value = type, scale = 0\\.45, colour = disabled and G\\.C\\.UI\\.TEXT_INACTIVE or G\\.C\\.UI\\.TEXT_LIGHT, shadow = not disabled\\}\\}"
+position = "at"
+payload = '''
+{n=G.UIT.T, config={
+    text = (
+        type == 'Boss'
+        and G.GAME and G.GAME.round_resets
+        and G.GAME.round_resets.ante >= 2
+        and MP and not MP.SINGLEPLAYER
+        and MP.my_player and MP.my_player()
+    ) and (
+        MP.my_player().bossReady and 'Readied' or 'Ready'
+    ) or G.GAME.round_resets.loc_blind_states[type],
+    scale = 0.45,
+    colour = disabled and G.C.UI.TEXT_INACTIVE or G.C.UI.TEXT_LIGHT,
+    shadow = not disabled
+}}
+'''

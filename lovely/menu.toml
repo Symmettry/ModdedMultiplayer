@@ -1,0 +1,50 @@
+[manifest]
+version = "1.0.0"
+priority = 10
+
+# Move profile a bit
+[[patches]]
+[patches.pattern]
+target = "game.lua"
+pattern = "                    G.PROFILE_BUTTON.alignment.offset.x = 0"
+position = "at"
+payload = "                    G.PROFILE_BUTTON.alignment.offset.x = -2"
+match_indent = true
+
+# Insert ONLINE after PLAY, smaller width
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "UIBox_button{id = 'main_menu_play', button = not G.SETTINGS.tutorial_complete and \"start_run\" or \"setup_run\", colour = G.C.BLUE, minw = 3.65, minh = 1.55, label = {localize('b_play_cap')}, scale = text_scale*2, col = true},"
+position = "after"
+payload = '''
+UIBox_button{id = 'online_button', button = 'open_online_menu', colour = G.C.PURPLE, minw = 2.3, minh = 1.35, label = {'ONLINE'}, scale = text_scale * 1.2, col = true},
+'''
+match_indent = true
+
+# Shrink PLAY a bit: 3.65 -> 3.25
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "UIBox_button{id = 'main_menu_play', button = not G.SETTINGS.tutorial_complete and \"start_run\" or \"setup_run\", colour = G.C.BLUE, minw = 3.65, minh = 1.55, label = {localize('b_play_cap')}, scale = text_scale*2, col = true},"
+position = "at"
+payload = "UIBox_button{id = 'main_menu_play', button = not G.SETTINGS.tutorial_complete and \"start_run\" or \"setup_run\", colour = G.C.BLUE, minw = 3.25, minh = 1.55, label = {localize('b_play_cap')}, scale = text_scale*2, col = true},"
+match_indent = true
+
+# Shrink OPTIONS: 2.65 -> 2.3
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "UIBox_button{button = 'options', colour = G.C.ORANGE, minw = 2.65, minh = 1.35, label = {localize('b_options_cap')}, scale = text_scale * 1.2, col = true},"
+position = "at"
+payload = "UIBox_button{button = 'options', colour = G.C.ORANGE, minw = 2.3, minh = 1.35, label = {localize('b_options_cap')}, scale = text_scale * 1.2, col = true},"
+match_indent = true
+
+# Shrink QUIT: 2.65 -> 2.3
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "G.F_QUIT_BUTTON and UIBox_button{button = quit_func, colour = G.C.RED, minw = 2.65, minh = 1.35, label = {localize('b_quit_cap')}, scale = text_scale * 1.2, col = true} or nil,"
+position = "at"
+payload = "G.F_QUIT_BUTTON and UIBox_button{button = quit_func, colour = G.C.RED, minw = 2.3, minh = 1.35, label = {localize('b_quit_cap')}, scale = text_scale * 1.2, col = true} or nil,"
+match_indent = true
