@@ -155,46 +155,80 @@ function Connection:emit(event_name, payload)
     end
 end
 
-function Connection:_request(method, path, body)
-    local response_chunks = {}
-    local body_string = method == 'GET' and '' or encode_body(body)
+local function next_request_id()
+    MP.HTTP._next_request_id = (MP.HTTP._next_request_id or 0) + 1
+    return MP.HTTP._next_request_id
+end
+function Connection:_request(method, path, body, callback)
+    local request_id = next_request_id()
+    local body_string = method == 'GET' and nil or encode_body(body)
 
-    local req = {
-        url = http_base() .. path,
+    MP.HTTP.pending = MP.HTTP.pending or {}
+
+    MP.HTTP.pending[request_id] = {
+        callback = callback,
         method = method,
-        sink = ltn12.sink.table(response_chunks),
+        path = path,
     }
 
+    local headers = nil
     if method ~= 'GET' then
-        req.headers = {
+        headers = {
             ["Content-Type"] = "application/json",
             ["Content-Length"] = tostring(#body_string),
         }
-        req.source = ltn12.source.string(body_string)
     end
 
-    local ok, request_ok, status_code, response_headers, status_line = safe_call(http.request, req)
-    if not ok then
-        return false, {
-            error = 'HTTP request failed',
-            detail = request_ok,
-        }
+    MP.HTTP.out_channel:push({
+        type = "request",
+        requestId = request_id,
+        url = http_base() .. path,
+        method = method,
+        headers = headers,
+        body = body_string,
+        timeout = self.config.request_timeout,
+    })
+
+    return request_id
+end
+
+function Connection:_process_http_responses()
+    MP.HTTP.pending = MP.HTTP.pending or {}
+
+    while true do
+        local response = MP.HTTP.in_channel:pop()
+        if not response then
+            break
+        end
+
+        local pending = MP.HTTP.pending[response.requestId]
+        MP.HTTP.pending[response.requestId] = nil
+
+        if pending and pending.callback then
+            local ok_result
+            local payload
+
+            if response.ok and tonumber(response.status_code) and tonumber(response.status_code) >= 200 and tonumber(response.status_code) < 300 then
+                ok_result = true
+                payload = decode_body(response.body) or {}
+            else
+                local decoded = decode_body(response.body) or {}
+                ok_result = false
+                payload = {
+                    status_code = response.status_code,
+                    headers = response.headers or {},
+                    status_line = response.status_line or '',
+                    body = decoded,
+                    error = response.error or decoded.error or ('HTTP ' .. tostring(response.status_code)),
+                }
+            end
+
+            local ok, err = pcall(pending.callback, ok_result, payload, response)
+            if not ok then
+                print('[Connection] HTTP callback error: ' .. tostring(err))
+            end
+        end
     end
-
-    local raw_body = table.concat(response_chunks)
-    local decoded = decode_body(raw_body) or {}
-
-    if tonumber(status_code) and tonumber(status_code) >= 200 and tonumber(status_code) < 300 then
-        return true, decoded, response_headers, status_line
-    end
-
-    return false, {
-        status_code = status_code,
-        headers = response_headers,
-        status_line = status_line,
-        body = decoded,
-        error = decoded.error or ('HTTP ' .. tostring(status_code)),
-    }
 end
 
 function Connection:_auth_body(extra)
@@ -213,128 +247,144 @@ function Connection:_auth_query()
     return '?playerId=' .. tostring(self.player_id) .. '&playerToken=' .. tostring(self.player_token)
 end
 
-function Connection:create_party(name)
-    local ok, response = self:_request('POST', '/party/create', {
+function Connection:create_party(name, callback)
+    self:_request('POST', '/party/create', {
         name = name,
-    })
+    }, function(ok, response)
+        if not ok then
+            self:emit('error', response)
+            if callback then callback(false, response) end
+            return
+        end
 
-    if not ok then
-        self:emit('error', response)
-        return false, response
-    end
+        self.player_id = response.playerId
+        self.player_token = response.playerToken
+        self.party_code = response.partyCode
+        self.party = response.party
+        self.last_event_id = response.party and response.party.lastEventId or 0
 
-    self.player_id = response.playerId
-    self.player_token = response.playerToken
-    self.party_code = response.partyCode
-    self.party = response.party
-    self.last_event_id = response.party and response.party.lastEventId or 0
-
-    return true, response
+        if callback then callback(true, response) end
+    end)
 end
 
-function Connection:join_party(party_code, name)
-    local ok, response = self:_request('POST', '/party/join', {
+function Connection:join_party(party_code, name, callback)
+    self:_request('POST', '/party/join', {
         partyCode = normalize_party_code(party_code),
         name = name,
-    })
+    }, function(ok, response)
+        if not ok then
+            self:emit('error', response)
+            if callback then callback(false, response) end
+            return
+        end
 
-    if not ok then
-        self:emit('error', response)
-        return false, response
-    end
+        self.player_id = response.playerId
+        self.player_token = response.playerToken
+        self.party_code = response.partyCode
+        self.party = response.party
+        self.last_event_id = response.party and response.party.lastEventId or 0
 
-    self.player_id = response.playerId
-    self.player_token = response.playerToken
-    self.party_code = response.partyCode
-    self.party = response.party
-    self.last_event_id = response.party and response.party.lastEventId or 0
-
-    return true, response
+        if callback then callback(true, response) end
+    end)
 end
 
-function Connection:select_lobby_options(deck, stake)
+function Connection:select_lobby_options(deck, stake, callback)
     if not self.party_code or not self.player_id or not self.player_token then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
-    local ok, response = self:_request('POST', '/party/select', self:_auth_body({
+    self:_request('POST', '/party/select', self:_auth_body({
         deck = deck,
         stake = stake,
-    }))
+    }), function(ok, response)
+        if ok and response and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response)
+        end
 
-    if ok and response.party then
-        self.party = response.party
-        self.last_event_id = response.party.lastEventId or self.last_event_id
-    else
-        self:emit('error', response)
-    end
-
-    return ok, response
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:set_ready(ready)
+function Connection:set_ready(ready, callback)
     if not self.party_code or not self.player_id or not self.player_token then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
-    local ok, response = self:_request('POST', '/party/ready', self:_auth_body({
+    self:_request('POST', '/party/ready', self:_auth_body({
         ready = ready and true or false,
-    }))
+    }), function(ok, response)
+        if ok and response and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response)
+        end
 
-    if ok and response.party then
-        self.party = response.party
-        self.last_event_id = response.party.lastEventId or self.last_event_id
-    else
-        self:emit('error', response)
-    end
-
-    return ok, response
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:start_match()
+function Connection:start_match(callback)
     if not self.party_code or not self.player_id or not self.player_token then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
-    local ok, response = self:_request('POST', '/party/start', self:_auth_body())
+    self:_request('POST', '/party/start', self:_auth_body(), function(ok, response)
+        if ok and response and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response)
+        end
 
-    if ok and response.party then
-        self.party = response.party
-        self.last_event_id = response.party.lastEventId or self.last_event_id
-    else
-        self:emit('error', response)
-    end
-
-    return ok, response
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:get_party_state()
+function Connection:get_party_state(callback)
     if not self.party_code then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
     local path = '/party/' .. tostring(self.party_code) .. self:_auth_query()
-    local ok, response = self:_request('GET', path)
 
-    if ok and response.party then
-        self.party = response.party
-        self.last_event_id = response.party.lastEventId or self.last_event_id
-    else
-        self:emit('error', response)
-    end
+    self:_request('GET', path, nil, function(ok, response)
+        if ok and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response)
+        end
 
-    return ok, response
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:signal_boss_ready()
-    return self:_request('POST', '/match/boss_ready', self:_auth_body())
+function Connection:signal_boss_ready(callback)
+    self:_request('POST', '/match/boss_ready', self:_auth_body(), function(ok, response)
+        if not ok then
+            self:emit('error', response)
+        end
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:send_boss_state(score, hands_used, hands_remaining, money, done, ante)
+function Connection:send_boss_state(score, hands_used, hands_remaining, money, done, ante, callback)
     local big_score = to_big(score)
     local big_money = to_big(money)
 
-    return self:_request('POST', '/match/report_state', self:_auth_body({
+    self:_request('POST', '/match/report_state', self:_auth_body({
         score = big_to_net(big_score),
         scoreFormatted = number_format(big_score),
         handsUsed = to_number(hands_used),
@@ -343,25 +393,43 @@ function Connection:send_boss_state(score, hands_used, hands_remaining, money, d
         moneyFormatted = number_format(big_money),
         done = done and true or false,
         ante = to_number(ante),
-    }))
+    }), function(ok, response)
+        if not ok then
+            self:emit('error', response)
+        end
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:take_life()
-    return self:_request('POST', '/match/take_life', self:_auth_body())
+function Connection:take_life(callback)
+    self:_request('POST', '/match/take_life', self:_auth_body(), function(ok, response)
+        if not ok then
+            self:emit('error', response)
+        end
+        if callback then callback(ok, response) end
+    end)
 end
 
-function Connection:leave_party()
+function Connection:leave_party(callback)
     if not self.party_code or not self.player_id or not self.player_token then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
-    local ok, response = self:_request('POST', '/party/leave', self:_auth_body())
-    self.party = nil
-    self.party_code = nil
-    self.player_id = nil
-    self.player_token = nil
-    self.last_event_id = 0
-    return ok, response
+    self:_request('POST', '/party/leave', self:_auth_body(), function(ok, response)
+        if not ok then
+            self:emit('error', response)
+        end
+
+        self.party = nil
+        self.party_code = nil
+        self.player_id = nil
+        self.player_token = nil
+        self.last_event_id = 0
+
+        if callback then callback(ok, response) end
+    end)
 end
 
 function Connection:_dispatch_event(event)
@@ -384,9 +452,11 @@ function Connection:_dispatch_event(event)
     end
 end
 
-function Connection:poll_events()
+function Connection:poll_events(callback)
     if not self.party_code or not self.player_id or not self.player_token then
-        return false, { error = 'Not in a party' }
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
     local path = '/party/' .. tostring(self.party_code) .. '/events?playerId='
@@ -394,27 +464,29 @@ function Connection:poll_events()
         .. '&playerToken=' .. tostring(self.player_token)
         .. '&since=' .. tostring(self.last_event_id or 0)
 
-    local ok, response = self:_request('GET', path)
-    if not ok then
-        self:emit('error', response)
-        return false, response
-    end
-
-    if response.party then
-        self.party = response.party
-    end
-
-    if response.events then
-        for _, event in ipairs(response.events) do
-            if event.eventId and event.eventId > (self.last_event_id or 0) then
-                self.last_event_id = event.eventId
-            end
-            self:_dispatch_event(event)
+    self:_request('GET', path, nil, function(ok, response)
+        if not ok then
+            self:emit('error', response)
+            if callback then callback(false, response) end
+            return
         end
-    end
 
-    self:emit('poll', response)
-    return true, response
+        if response.party then
+            self.party = response.party
+        end
+
+        if response.events then
+            for _, event in ipairs(response.events) do
+                if event.eventId and event.eventId > (self.last_event_id or 0) then
+                    self.last_event_id = event.eventId
+                end
+                self:_dispatch_event(event)
+            end
+        end
+
+        self:emit('poll', response)
+        if callback then callback(true, response) end
+    end)
 end
 
 function Connection:_current_poll_interval()
@@ -433,6 +505,12 @@ function Connection:_current_poll_interval()
 end
 
 function Connection:update(dt)
+    self:_process_http_responses()
+
+    if not self.party_code or not self.player_id or not self.player_token then
+        return
+    end
+
     local current_time = get_time()
     local interval = self:_current_poll_interval()
 

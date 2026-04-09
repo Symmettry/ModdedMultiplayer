@@ -14,6 +14,8 @@ MP.HTTP = MP.HTTP or {
     out_channel = love.thread.getChannel("modmulti_http_request"),
     in_channel = love.thread.getChannel("modmulti_http_response"),
     started = false,
+    pending = {},
+    _next_request_id = 0,
 }
 
 if not MP.HTTP.started then

@@ -312,75 +312,80 @@ G.FUNCS.online_submit_join_party = function()
         return
     end
 
-    local ok, response = MP.CONN:join_party(code, MP.player_name())
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to join party')
-        MP.open_overlay(create_UIBox_online_join_party_menu())
-        return
-    end
+    MP.CONN:join_party(code, MP.player_name(), function(ok, response)
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to join party')
+            MP.open_overlay(create_UIBox_online_join_party_menu())
+            return
+        end
 
-    MP.UI.status = 'Joined party'
-    MP.open_overlay(create_UIBox_online_party_menu())
+        MP.UI.status = 'Joined party'
+        MP.open_overlay(create_UIBox_online_party_menu())
+    end)
 end
 
 G.FUNCS.online_create_party = function()
     MP.UI.status = ''
 
-    local ok, response = MP.CONN:create_party(MP.player_name())
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to create party')
-        MP.open_overlay(create_UIBox_online_menu())
-        return
-    end
+    MP.CONN:create_party(MP.player_name(), function(ok, response)
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to create party')
+            MP.open_overlay(create_UIBox_online_menu())
+            return
+        end
 
-    local ready_ok, ready_response = MP.CONN:set_ready(true)
-    if not ready_ok then
-        MP.UI.status = tostring((ready_response and ready_response.error) or 'Party created, but failed to auto-ready host')
-    else
-        MP.UI.status = 'Created party'
-    end
+        MP.CONN:set_ready(true, function(ready_ok, ready_response)
+            if not ready_ok then
+                MP.UI.status = tostring((ready_response and ready_response.error) or 'Party created, but failed to auto-ready host')
+            else
+                MP.UI.status = 'Created party'
+            end
 
-    MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu())
+        end)
+    end)
 end
 
 G.FUNCS.online_leave_party = function()
     MP.UI.status = ''
 
-    local ok, response = MP.CONN:leave_party()
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to leave party')
-    end
+    MP.CONN:leave_party(function(ok, response)
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to leave party')
+        end
 
-    MP.UI.selecting_lobby_options = false
-    MP.launching_run = false
-    MP.started_match_id = nil
-    G.SETTINGS.paused = false
+        MP.UI.selecting_lobby_options = false
+        MP.launching_run = false
+        MP.started_match_id = nil
+        G.SETTINGS.paused = false
 
-    if G.OVERLAY_MENU then
-        G.OVERLAY_MENU:remove()
-        G.OVERLAY_MENU = nil
-    end
+        if G.OVERLAY_MENU then
+            G.OVERLAY_MENU:remove()
+            G.OVERLAY_MENU = nil
+        end
 
-    MP.open_overlay(create_UIBox_online_menu())
+        MP.open_overlay(create_UIBox_online_menu())
+    end)
 end
 
 G.FUNCS.online_start_match = function()
     MP.UI.status = ''
 
-    local ok, response = MP.CONN:start_match()
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to start match')
-        MP.open_overlay(create_UIBox_online_party_menu())
-        return
-    end
+    MP.CONN:start_match(function(ok, response)
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to start match')
+            MP.open_overlay(create_UIBox_online_party_menu())
+            return
+        end
 
-    MP.UI.status = 'Starting match'
+        MP.UI.status = 'Starting match'
 
-    MP.try_launch_party_run()
+        MP.try_launch_party_run()
 
-    if not MP.launching_run then
-        MP.open_overlay(create_UIBox_online_party_menu())
-    end
+        if not MP.launching_run then
+            MP.open_overlay(create_UIBox_online_party_menu())
+        end
+    end)
 end
 
 G.FUNCS.online_select_lobby_options = function()
@@ -401,14 +406,15 @@ G.FUNCS.online_toggle_ready = function()
     local me = MP.my_player()
     local new_ready = not (me and me.ready)
 
-    local ok, response = MP.CONN:set_ready(new_ready)
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to update ready state')
-    else
-        MP.UI.status = new_ready and 'Ready' or 'Not ready'
-    end
+    MP.CONN:set_ready(new_ready, function(ok, response)
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to update ready state')
+        else
+            MP.UI.status = new_ready and 'Ready' or 'Not ready'
+        end
 
-    MP.open_overlay(create_UIBox_online_party_menu())
+        MP.open_overlay(create_UIBox_online_party_menu())
+    end)
 end
 
 G.FUNCS.online_return_to_party_menu = function()

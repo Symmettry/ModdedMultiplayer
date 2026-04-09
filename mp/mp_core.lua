@@ -182,18 +182,24 @@ end
 
 function MP.refresh_party_menu()
     if not (MP and MP.CONN and MP.CONN.party_code) then return end
+    if MP._refresh_in_flight then return end
 
-    local ok, response = MP.CONN:get_party_state()
-    if not ok then
-        MP.UI.status = tostring((response and response.error) or 'Failed to refresh party')
-        return
-    end
+    MP._refresh_in_flight = true
 
-    MP.try_launch_party_run()
+    MP.CONN:get_party_state(function(ok, response)
+        MP._refresh_in_flight = false
 
-    if G.OVERLAY_MENU and not MP.launching_run then
-        MP.open_overlay(create_UIBox_online_party_menu())
-    end
+        if not ok then
+            MP.UI.status = tostring((response and response.error) or 'Failed to refresh party')
+            return
+        end
+
+        MP.try_launch_party_run()
+
+        if G.OVERLAY_MENU and not MP.launching_run then
+            MP.open_overlay(create_UIBox_online_party_menu())
+        end
+    end)
 end
 
 function MP.selected_deck_name_from_setup()
@@ -254,8 +260,12 @@ function Game:update(dt)
         end
     end
 
-    if MP and MP.CONN and MP.CONN.party_code then
+    -- todo optimize so that it doesnt :update whenever not in main menu
+    if MP and MP.CONN then
         MP.CONN:update(dt)
+    end
+
+    if MP and MP.CONN and MP.CONN.party_code then
 
         MP.try_launch_party_run()
 
@@ -352,32 +362,33 @@ local function mp_capture_setup_and_return_to_party()
     if not deck_name or stake == nil then
         MP.UI.status = 'Failed to read deck/stake from setup'
     else
-        local ok, response = MP.CONN:select_lobby_options(deck_name, stake)
-        if not ok then
-            MP.UI.status = tostring((response and response.error) or 'Failed to set deck/stake')
-        else
-            MP.UI.status = 'Selected ' .. tostring(deck_name) .. ' / Stake ' .. tostring(stake)
-        end
+        MP.CONN:select_lobby_options(deck_name, stake, function(ok, response)
+            if not ok then
+                MP.UI.status = tostring((response and response.error) or 'Failed to set deck/stake')
+            else
+                MP.UI.status = 'Selected ' .. tostring(deck_name) .. ' / Stake ' .. tostring(stake)
+            end
+
+            MP.UI.selecting_lobby_options = false
+            G.SETTINGS.paused = false
+
+            if G.OVERLAY_MENU then
+                G.OVERLAY_MENU:remove()
+                G.OVERLAY_MENU = nil
+            end
+
+            G.E_MANAGER:add_event(Event({
+                trigger = 'after',
+                delay = 0.05,
+                blockable = false,
+                blocking = false,
+                func = function()
+                    MP.open_overlay(create_UIBox_online_party_menu())
+                    return true
+                end
+            }))
+        end)
     end
-
-    MP.UI.selecting_lobby_options = false
-    G.SETTINGS.paused = false
-
-    if G.OVERLAY_MENU then
-        G.OVERLAY_MENU:remove()
-        G.OVERLAY_MENU = nil
-    end
-
-    G.E_MANAGER:add_event(Event({
-        trigger = 'after',
-        delay = 0.05,
-        blockable = false,
-        blocking = false,
-        func = function()
-            MP.open_overlay(create_UIBox_online_party_menu())
-            return true
-        end
-    }))
 end
 
 local mp_run_setup_ui_ref = G.UIDEF.run_setup
@@ -458,40 +469,48 @@ G.FUNCS.exit_overlay_menu = function(e)
     end
 end
 
-function MP.set_boss_ready()
+function MP.set_boss_ready(callback)
     if not (MP and MP.CONN) then
-        return false, { error = 'No multiplayer connection' }
+        local err = { error = 'No multiplayer connection' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
     local state = MP.party_state and MP.party_state() or nil
     if state ~= 'RUNNING_TO_BOSS' and state ~= 'BOSS_COUNTDOWN' then
-        return false, { error = 'Party is not in a boss-ready state' }
+        local err = { error = 'Party is not in a boss-ready state' }
+        if callback then callback(false, err) end
+        return false, err
     end
 
     local me = MP.my_player and MP.my_player()
     if me and me.bossReady then
-        return true, { ok = true, already_ready = true }
+        local res = { ok = true, already_ready = true }
+        if callback then callback(true, res) end
+        return true, res
     end
 
-    local ok, response = MP.CONN:signal_boss_ready()
-    if not ok then
+    MP.CONN:signal_boss_ready(function(ok, response)
+        if not ok then
+            MP.UI = MP.UI or {}
+            MP.UI.status = tostring((response and response.error) or 'Failed to ready for boss')
+            if callback then callback(false, response) end
+            return
+        end
+
+        if response and response.party then
+            MP.CONN.party = response.party
+        end
+
         MP.UI = MP.UI or {}
-        MP.UI.status = tostring((response and response.error) or 'Failed to ready for boss')
-        return false, response
-    end
+        MP.UI.status = 'Boss readied'
 
-    if response and response.party then
-        MP.CONN.party = response.party
-    end
+        if G.OVERLAY_MENU and MP.refresh_party_menu then
+            MP.refresh_party_menu()
+        end
 
-    MP.UI = MP.UI or {}
-    MP.UI.status = 'Boss readied'
-
-    if G.OVERLAY_MENU and MP.refresh_party_menu then
-        MP.refresh_party_menu()
-    end
-
-    return true, response
+        if callback then callback(true, response) end
+    end)
 end
 
 local _select_blind = G.FUNCS.select_blind
@@ -636,6 +655,7 @@ function MP.listeners()
     if not MP._boss_state_updated_handler_registered then
         MP._boss_state_updated_handler_registered = true
 
+        
         MP.CONN:on('boss_state_updated', function(event)
             if not event or not event.data then return end
 
@@ -678,19 +698,21 @@ function MP.on_boss_failed_round()
     local money = G.GAME.dollars or 0
     local ante = (G.GAME.round_resets and G.GAME.round_resets.ante) or 0
 
-    local ok, err = MP.CONN:send_boss_state(
+    MP.CONN:send_boss_state(
         chips,
         hands_used,
         hands_remaining,
         money,
         true,
-        ante
+        ante,
+        function(ok, response)
+            if not ok then
+                print('[MP] failed to send final boss state: ' .. tostring(response and response.error or response))
+            else
+                print('[MP] sent final boss state')
+            end
+        end
     )
-    if not ok then
-        print('[MP] failed to send final boss state: ' .. tostring(err and err.error or err))
-    else
-        print('[MP] sent final boss state')
-    end
 
     MP.UI.status = 'Waiting for opponent to finish boss'
 end

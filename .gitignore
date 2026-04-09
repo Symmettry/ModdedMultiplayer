@@ -1,4 +1,5 @@
 node_modules/
 server.js
-package-log.json
+test.js
+package-lock.json
 package.json
