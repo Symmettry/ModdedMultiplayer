@@ -1,3 +1,5 @@
+print('[MP] UI registering')
+
 MP = MP or {}
 
 function MP.party_players_nodes()
@@ -416,20 +418,6 @@ G.FUNCS.online_toggle_ready = function()
         MP.open_overlay(create_UIBox_online_party_menu())
     end)
 end
-
-G.FUNCS.online_return_to_party_menu = function()
-    MP.UI.selecting_lobby_options = false
-    G.SETTINGS.paused = false
-
-    if G.OVERLAY_MENU then
-        G.OVERLAY_MENU:remove()
-        G.OVERLAY_MENU = nil
-    end
-
-    MP.open_overlay(create_UIBox_online_party_menu())
-end
-
--- Lives hud
 
 local _create_UIBox_HUD = create_UIBox_HUD
 

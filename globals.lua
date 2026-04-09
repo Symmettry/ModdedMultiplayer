@@ -1,6 +1,5 @@
 LOAD("conn/connection.lua")
-LOAD("mp/mp_core.lua")
-LOAD("mp/mp_ui.lua")
+MP.load_mod_files("mp")
 
 local mod = MP.mod
 assert(mod, "MP.mod is nil")
