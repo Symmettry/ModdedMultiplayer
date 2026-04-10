@@ -86,7 +86,7 @@ SMODS.Blind{
     end,
 
     in_pool = function(self)
-        return G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante >= 2
+        return MP and not MP.SINGLEPLAYER and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante >= 2
     end,
 
     loc_vars = function(self)

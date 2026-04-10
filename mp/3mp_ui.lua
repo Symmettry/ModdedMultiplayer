@@ -350,6 +350,7 @@ end
 
 G.FUNCS.online_leave_party = function()
     MP.UI.status = ''
+    MP.SINGLEPLAYER = true
 
     MP.CONN:leave_party(function(ok, response)
         if not ok then
