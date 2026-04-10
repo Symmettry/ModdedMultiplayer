@@ -201,4 +201,13 @@ function MP.listeners()
             MP._boss_state_dirty = true
         end)
     end
+
+    if MP and MP.CONN then
+        MP.CONN:on('card_cached', function(event)
+            local data = event.data or {}
+            if data.key and data.ability then
+                MP.CONN:push_cached(data.key, data.ability)
+            end
+        end)
+    end
 end

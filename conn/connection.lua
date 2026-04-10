@@ -112,6 +112,7 @@ function Connection.new(opts)
     self.player_token = nil
     self.party_code = nil
     self.party = nil
+    self.cache = {}
 
     self.last_event_id = 0
     self.last_poll_at = 0
@@ -190,6 +191,52 @@ function Connection:_request(method, path, body, callback)
     })
 
     return request_id
+end
+
+function Connection:cached(key, ability)
+    if not key then
+        return nil
+    end
+
+    local queue = self.cache[key]
+    if queue and #queue > 0 then
+        local value = table.remove(queue, 1)
+        if #queue == 0 then
+            self.cache[key] = nil
+        end
+        return value
+    end
+
+    if not self.party_code or not self.player_id or not self.player_token then
+        return nil
+    end
+
+    local encoded_key = tostring(key):gsub("([^%w%-_%.~])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    self:_request(
+        'POST',
+        '/party/' .. tostring(self.party_code) .. '/cache'
+            .. '?playerId=' .. tostring(self.player_id)
+            .. '&playerToken=' .. tostring(self.player_token)
+            .. '&key=' .. tostring(encoded_key),
+        ability,
+        function(ok, response)
+            if not ok then
+                self:emit('error', response)
+            end
+        end
+    )
+
+    return nil
+end
+function Connection:push_cached(key, ability)
+    if not key or ability == nil then
+        return
+    end
+
+    self.cache[key] = self.cache[key] or {}
+    table.insert(self.cache[key], ability)
 end
 
 function Connection:_process_http_responses()
@@ -475,6 +522,8 @@ function Connection:_dispatch_event(event)
         self:emit('next_boss_ready', event)
     elseif event.type == 'match_complete' then
         self:emit('match_complete', event)
+    elseif event.type == 'card_cached' then
+        self:emit('card_cached', event)
     end
 end
 

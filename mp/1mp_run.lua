@@ -176,3 +176,44 @@ function Game:update(dt)
 
     return ret
 end
+
+local _create_card = create_card
+local _copy_card = copy_card
+
+function MP.card_result(tag, card)
+    if not card then
+        MP.print("[" .. tag .. "] returned nil")
+        return
+    end
+
+    local key = card.config and card.config.center_key
+        or (card.config and card.config.center and card.config.center.key)
+        or (card.ability and card.ability.name)
+        or "unknown"
+
+    MP.print("[" .. tag .. "] key = " .. tostring(key))
+    MP.print(card)
+    return key
+end
+
+function MP.modify_card(fn, tag, ...)
+    local card = fn(...)
+    if MP and not MP.SINGLEPLAYER then
+        local key = MP.card_result(tag, card)
+        local cached = MP.CONN:cached(key, card.ability)
+        if cached then
+            for k, v in pairs(cached) do
+                card.ability[k] = v
+            end
+        end
+    end
+    return card
+end
+
+function create_card(...)
+    return MP.modify_card(_create_card, "create_card", ...)
+end
+
+function copy_card(...)
+    return MP.modify_card(_copy_card, "copy_card", ...)
+end
