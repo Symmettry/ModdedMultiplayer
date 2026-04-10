@@ -247,9 +247,34 @@ function Connection:_auth_query()
     return '?playerId=' .. tostring(self.player_id) .. '&playerToken=' .. tostring(self.player_token)
 end
 
+local function get_all_mods()
+    local result = {}
+    local seen = {}
+
+    local function add(mod)
+        if mod and mod.can_load and not seen[mod.id] then
+            seen[mod.id] = true
+            result[#result + 1] = mod.id
+        end
+    end
+
+    for _, mod in pairs(SMODS.Mods) do
+        add(mod)
+    end
+
+    for _, providers in pairs(SMODS.provided_mods) do
+        for _, v in ipairs(providers) do
+            add(v.mod)
+        end
+    end
+
+    return result
+end
+
 function Connection:create_party(name, callback)
     self:_request('POST', '/party/create', {
         name = name,
+        mods = get_all_mods(),
     }, function(ok, response)
         if not ok then
             self:emit('error', response)
@@ -271,6 +296,7 @@ function Connection:join_party(party_code, name, callback)
     self:_request('POST', '/party/join', {
         partyCode = normalize_party_code(party_code),
         name = name,
+        mods = get_all_mods(),
     }, function(ok, response)
         if not ok then
             self:emit('error', response)
