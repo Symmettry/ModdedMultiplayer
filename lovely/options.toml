@@ -1,0 +1,25 @@
+[manifest]
+version = "1.0.0"
+priority = 10
+
+# Replace MAIN MENU with LEAVE PARTY
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "main_menu = UIBox_button{ label = {localize('b_main_menu')}, button = \"go_to_menu\", minw = 5}"
+position = "at"
+payload = '''
+main_menu = ((MP and not MP.SINGLEPLAYER)
+  and UIBox_button{ label = {'Leave Party'}, button = 'online_leave_party', minw = 5}
+  or UIBox_button{ label = {localize('b_main_menu')}, button = "go_to_menu", minw = 5})
+'''
+match_indent = true
+
+# Remove SEED + COPY SEED
+[[patches]]
+[patches.pattern]
+target = "functions/UI_definitions.lua"
+pattern = "G.GAME.seeded and current_seed or nil,"
+position = "at"
+payload = "(MP and not MP.SINGLEPLAYER) and nil or (G.GAME.seeded and current_seed or nil),"
+match_indent = true

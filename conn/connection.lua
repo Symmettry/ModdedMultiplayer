@@ -140,8 +140,8 @@ end
 
 function Connection:emit(event_name, payload)
     if event_name ~= "poll" then
-        print('[MP] Received event ' .. event_name .. ' with value')
-        print(payload)
+        MP.print('Received event ' .. event_name .. ' with value')
+        MP.print(payload)
     end
 
     local handlers = self.handlers[event_name]
@@ -150,7 +150,7 @@ function Connection:emit(event_name, payload)
     for _, handler in ipairs(handlers) do
         local ok, err = pcall(handler, payload, self)
         if not ok then
-            print('[Connection] handler error for event ' .. tostring(event_name) .. ': ' .. tostring(err))
+            MP.print('[Connection] handler error for event ' .. tostring(event_name) .. ': ' .. tostring(err))
         end
     end
 end
@@ -225,7 +225,7 @@ function Connection:_process_http_responses()
 
             local ok, err = pcall(pending.callback, ok_result, payload, response)
             if not ok then
-                print('[Connection] HTTP callback error: ' .. tostring(err))
+                MP.print('[Connection] HTTP callback error: ' .. tostring(err))
             end
         end
     end

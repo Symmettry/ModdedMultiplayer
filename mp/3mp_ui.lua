@@ -1,4 +1,4 @@
-print('[MP] UI registering')
+MP.print('UI registering')
 
 MP = MP or {}
 

@@ -1,4 +1,4 @@
-print('[MP] Events registering')
+MP.print('Events registering')
 
 MP = MP or {}
 
@@ -85,12 +85,12 @@ function MP.listeners()
 
         MP.CONN:on('boss_started', function(event)
             if MP.party_state and MP.party_state() ~= 'BOSS_ACTIVE' then
-                print('[MP] Ignoring boss_started while not in BOSS_ACTIVE')
+                MP.print('Ignoring boss_started while not in BOSS_ACTIVE')
                 return
             end
 
             if not MP.last_boss_select_e then
-                print('[MP] No stored boss select event')
+                MP.print('No stored boss select event')
                 return
             end
 
@@ -103,7 +103,7 @@ function MP.listeners()
                 done = nil,
             }
 
-            print('[MP] Replaying stored boss select')
+            MP.print('Replaying stored boss select')
             _select_blind(MP.last_boss_select_e)
             MP.last_boss_select_e = nil
         end)
@@ -113,7 +113,7 @@ function MP.listeners()
         MP._match_complete_handler_registered = true
 
         MP.CONN:on('match_complete', function(event)
-            print('[MP] match_complete received, returning to party menu')
+            MP.print('match_complete received, returning to party menu')
 
             local me = MP.my_player and MP.my_player()
             if me and me.lives ~= nil and G and G.GAME then
@@ -145,7 +145,7 @@ function MP.listeners()
         MP._boss_result_handler_registered = true
 
         MP.CONN:on('boss_result', function(event)
-            print('[MP] boss_result received')
+            MP.print('boss_result received')
 
             if not event or not event.data then return end
             local data = event.data
@@ -163,7 +163,7 @@ function MP.listeners()
                 G.GAME.lives = me.lives
             end
 
-            print('[MP] loser lives now ' .. tostring(data.loserLives))
+            MP.print('loser lives now ' .. tostring(data.loserLives))
 
             G.GAME.blind.chips = 1
             MP.force_end_round()

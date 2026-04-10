@@ -1,4 +1,4 @@
-print('[MP] Core registering')
+MP.print('Core registering')
 
 MP = MP or {}
 MP.last_boss_select_e = nil

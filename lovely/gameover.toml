@@ -32,7 +32,7 @@ if game_over then
             and G.GAME.round_resets
             and G.GAME.round_resets.ante >= 2 then
 
-            print("[MP] Prevented boss death")
+            MP.print("Prevented boss death")
             MP.on_boss_failed_round()
             G.STATE_COMPLETE = false
             G.STATE = G.STATES.SELECTING_HAND

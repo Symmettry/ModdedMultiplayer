@@ -1,4 +1,4 @@
-print('[MP] Setup registering')
+MP.print('Setup registering')
 
 function MP.selected_deck_name_from_setup()
     local back =

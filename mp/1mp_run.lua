@@ -1,4 +1,4 @@
-print('[MP] Run registering')
+MP.print('Run registering')
 
 function MP.try_launch_party_run()
     if not (MP and MP.CONN and MP.CONN.party) then return end
@@ -15,7 +15,7 @@ function MP.try_launch_party_run()
     local stake_value = MP.party_stake()
     local seed = MP.party_seed()
 
-    print('[MP] launch deck=' .. tostring(deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
+    MP.print('launch deck=' .. tostring(deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
 
     if not match_id or not deck_name or stake_value == nil or not seed then
         return
@@ -32,7 +32,7 @@ function MP.try_launch_party_run()
     local deck_center = G.P_CENTERS and G.P_CENTERS[deck_name] or nil
     local launch_deck_name = (deck_center and deck_center.name) or deck_name
 
-    print('[MP] launch deck_key=' .. tostring(deck_name) .. ' deck_name=' .. tostring(launch_deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
+    MP.print('launch deck_key=' .. tostring(deck_name) .. ' deck_name=' .. tostring(launch_deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
 
     if G.STAGE == G.STAGES.MAIN_MENU then
         G:delete_run()
@@ -80,12 +80,20 @@ end
 function MP.force_end_round()
     MP._forced_end_round = true
 
-    print('[MP] Forcing end_round()')
+    MP.print('Forcing end_round()')
 
     G.GAME.chips = G.GAME.blind.chips
     G.STATE = G.STATES.HAND_PLAYED
     G.STATE_COMPLETE = true
-    end_round()
+    end_round(true)
+end
+
+local _end_round = end_round
+function end_round(modded)
+    if modded == nil and G.GAME.blind.boss and G.GAME.round_resets.ante >= 2 and MP and not MP.SINGLEPLAYER then
+        return
+    end
+    return _end_round()
 end
 
 function MP.on_boss_failed_round()
@@ -108,9 +116,9 @@ function MP.on_boss_failed_round()
         ante,
         function(ok, response)
             if not ok then
-                print('[MP] failed to send final boss state: ' .. tostring(response and response.error or response))
+                MP.print('failed to send final boss state: ' .. tostring(response and response.error or response))
             else
-                print('[MP] sent final boss state')
+                MP.print('sent final boss state')
             end
         end
     )
