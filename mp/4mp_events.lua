@@ -89,11 +89,6 @@ function MP.listeners()
     end)
 
     register_once('_boss_started_handler_registered', 'boss_started', function()
-        if MP.party_state and MP.party_state() ~= 'BOSS_ACTIVE' then
-            MP.print('Ignoring boss_started while not in BOSS_ACTIVE')
-            return
-        end
-
         if not MP.last_boss_select_e then
             MP.print('No stored boss select event')
             return

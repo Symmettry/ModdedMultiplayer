@@ -1,5 +1,4 @@
 node_modules/
-server.js
-test.js
+*.js
 package-lock.json
 package.json

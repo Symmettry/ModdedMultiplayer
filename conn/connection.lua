@@ -273,7 +273,7 @@ function Connection:_request_ws(send_key, data, response_key, callback)
         self:_enqueue_ws_callback(response_key, callback)
     end
 
-    self.ws:send(send_key .. encode_body(data or {}))
+    self.ws:emit(send_key, data or {})
     return true
 end
 
@@ -369,7 +369,7 @@ function Connection:send_base_hands()
         return false, { error = 'No game hands available' }
     end
 
-    self.ws:send('hands' .. encode_body(snapshot_base_hands(G.GAME.hands)))
+    self.ws:emit('hands', snapshot_base_hands(G.GAME.hands))
     return true
 end
 
@@ -576,35 +576,38 @@ function Connection:init_socket(callback)
     end)
 
     ws:on("message", function(_, ev)
-        local text = ev and ev.data or ev
-        if not text then
+        local raw = ev and ev.data or ev
+        if not raw then
+            MP.print("[ws] Did not receive raw data !!")
             return
         end
 
-        MP.print("Received socket message: ", text)
-
-        local start = string.find(text, "{", 1, true)
-        if not start then
-            MP.print("[ws] invalid message: " .. tostring(text))
-            return
-        end
-
-        local key = string.sub(text, 1, start - 1)
-        local json_str = string.sub(text, start)
-
-        local ok, data = pcall(function()
-            return json.decode(json_str)
+        local ok, packet = pcall(function()
+            return Socket.JSON.decompressJSON({string.byte(raw, 1, #raw)})
         end)
 
-        if not ok then
-            MP.print("[ws] json parse error: " .. tostring(json_str))
+        if not ok or type(packet) ~= "table" then
+            MP.print("[ws] binary decode error: " .. tostring(packet))
             return
         end
+
+        local key = packet.key
+        local data = packet.data
+
+        if not key then
+            MP.print("[ws] missing packet key")
+            MP.print(packet)
+            return
+        end
+
+        MP.print("Received socket packet: ", key)
+        MP.print(data)
 
         if key == "events" then
             _self:_handle_ws_events_response(data)
             return
         end
+
         if key == "party_state" then
             if data and data.success ~= false and data.party then
                 _self.party = data.party
@@ -618,11 +621,6 @@ function Connection:init_socket(callback)
             else
                 _self:emit('error', data)
             end
-            return
-        end
-
-        if key == "beat" then
-            -- todo idk ping check or something
             return
         end
 
@@ -849,7 +847,7 @@ function Connection:update(dt)
 
         _timeSinceBeat = _timeSinceBeat + dt
         if _timeSinceBeat > 3 then
-            self.ws:send("beat{}")
+            self.ws:emit("beat", {})
             _timeSinceBeat = _timeSinceBeat - 3
         end
     end
