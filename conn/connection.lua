@@ -625,6 +625,7 @@ function Connection:init_socket(callback)
         end
 
         local pending_callback = _self:_dequeue_ws_callback(key)
+        
         if pending_callback then
             local cb_ok, cb_err = pcall(pending_callback, data)
             if not cb_ok then
