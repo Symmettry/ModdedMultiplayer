@@ -34,6 +34,7 @@ end
 local function http_base()
     return MP.mod.config.server or "http://127.0.0.1:3001"
 end
+
 local function ws_base()
     return MP.mod.config.wsserver or "ws://127.0.0.1:3001"
 end
@@ -117,6 +118,8 @@ function Connection.new(opts)
     self.party_code = nil
     self.party = nil
     self.ws = nil
+    self.ws_connected = false
+    self.ws_pending = {}
     self.cache = {}
 
     self.last_event_id = 0
@@ -132,6 +135,8 @@ function Connection.new(opts)
         match_complete = {},
         raw_event = {},
         poll = {},
+        card_cached = {},
+        life_lost = {},
     }
 
     return self
@@ -146,7 +151,7 @@ end
 
 function Connection:emit(event_name, payload)
     if event_name ~= "poll" then
-        MP.print('Received event ' .. event_name .. ' with value')
+        MP.print('Received event ' .. tostring(event_name) .. ' with value')
         MP.print(payload)
     end
 
@@ -165,6 +170,7 @@ local function next_request_id()
     MP.HTTP._next_request_id = (MP.HTTP._next_request_id or 0) + 1
     return MP.HTTP._next_request_id
 end
+
 function Connection:_request(method, path, body, callback)
     local request_id = next_request_id()
     local body_string = method == 'GET' and nil or encode_body(body)
@@ -198,6 +204,57 @@ function Connection:_request(method, path, body, callback)
     return request_id
 end
 
+function Connection:_enqueue_ws_callback(response_key, callback)
+    if not response_key or not callback then
+        return
+    end
+
+    self.ws_pending[response_key] = self.ws_pending[response_key] or {}
+    table.insert(self.ws_pending[response_key], callback)
+end
+
+function Connection:_dequeue_ws_callback(response_key)
+    local queue = self.ws_pending[response_key]
+    if not queue or #queue == 0 then
+        return nil
+    end
+
+    local callback = table.remove(queue, 1)
+    if #queue == 0 then
+        self.ws_pending[response_key] = nil
+    end
+    return callback
+end
+
+function Connection:_request_ws(send_key, data, response_key, callback)
+    if not self.ws then
+        if callback then
+            callback({
+                success = false,
+                error = 'Socket not initialized',
+            })
+        end
+        return false
+    end
+
+    if not self.ws_connected and send_key ~= 'init' then
+        if callback then
+            callback({
+                success = false,
+                error = 'Socket not connected',
+            })
+        end
+        return false
+    end
+
+    if callback and response_key then
+        self:_enqueue_ws_callback(response_key, callback)
+    end
+
+    self.ws:send(send_key .. encode_body(data or {}))
+    return true
+end
+
 function Connection:cached(key, ability)
     if not key then
         return nil
@@ -219,6 +276,7 @@ function Connection:cached(key, ability)
     local encoded_key = tostring(key):gsub("([^%w%-_%.~])", function(c)
         return string.format("%%%02X", string.byte(c))
     end)
+
     self:_request(
         'POST',
         '/party/' .. tostring(self.party_code) .. '/cache'
@@ -235,6 +293,7 @@ function Connection:cached(key, ability)
 
     return nil
 end
+
 function Connection:push_cached(key, ability)
     if not key or ability == nil then
         return
@@ -324,36 +383,111 @@ local function get_all_mods()
 end
 
 function MP.update_ws() end
+
+function Connection:_dispatch_event(event)
+    self:emit('raw_event', event)
+
+    if event.type == 'party_updated' then
+        self:emit('party_updated', event)
+    elseif event.type == 'match_started' then
+        self:emit('match_started', event)
+    elseif event.type == 'boss_started' then
+        self:emit('boss_started', event)
+    elseif event.type == 'boss_state_updated' then
+        self:emit('boss_state_updated', event)
+    elseif event.type == 'boss_result' then
+        self:emit('boss_result', event)
+    elseif event.type == 'next_boss_ready' then
+        self:emit('next_boss_ready', event)
+    elseif event.type == 'match_complete' then
+        self:emit('match_complete', event)
+    elseif event.type == 'card_cached' then
+        self:emit('card_cached', event)
+    elseif event.type == 'life_lost' then
+        self:emit('life_lost', event)
+    end
+end
+
+function Connection:_handle_ws_events_response(response)
+    if not response then
+        return
+    end
+
+    if response.success == false then
+        self:emit('error', response)
+        return
+    end
+
+    if response.party then
+        self.party = response.party
+        self.last_event_id = response.party.lastEventId or self.last_event_id
+    end
+
+    if response.events then
+        for _, event in ipairs(response.events) do
+            if event.eventId and event.eventId > (self.last_event_id or 0) then
+                self.last_event_id = event.eventId
+            end
+            self:_dispatch_event(event)
+        end
+    end
+
+    self:emit('poll', response)
+end
+
 function Connection:init_socket(callback)
-    local ws = Socket.connect(MP.mod, "ws://localhost:3001")
+    local ws = Socket.connect(MP.mod, ws_base())
     local _self = self
 
     self.ws = ws
+    self.ws_connected = false
+    self.ws_pending = {}
 
     MP.update_ws = function()
         ws:update()
     end
 
-    ws:on("error", function(self, ev)
-        MP.print("[ws] error", ev.message)
+    ws:on("error", function(_, ev)
+        MP.print("[ws] error", ev and ev.message or ev)
+
+        if not _self.ws_connected and callback then
+            local cb = callback
+            callback = nil
+            cb(false, {
+                success = false,
+                error = ev and ev.message or 'WebSocket error',
+            })
+        end
     end)
 
-    ws:on("open", function(self, ev)
-        ws:send(
-            'init{"party":"' .. _self.party_code ..
-            '","player_id":"' .. _self.player_id ..
-            '","player_token":"' .. _self.player_token .. '"}'
-        )
+    ws:on("open", function()
+        _self:_request_ws("init", {
+            party = _self.party_code,
+            player_id = _self.player_id,
+            player_token = _self.player_token,
+        }, "init", function(data)
+            local success = data and data.success == true
+            _self.ws_connected = success
+
+            if callback then
+                local cb = callback
+                callback = nil
+                cb(success, data)
+            end
+        end)
     end)
 
-    ws:on("message", function(self, ev)
-        local text = ev.data or ev
+    ws:on("message", function(_, ev)
+        local text = ev and ev.data or ev
+        if not text then
+            return
+        end
 
-        if not text then return end
+        MP.print("Received socket message: ", text)
 
         local start = string.find(text, "{", 1, true)
         if not start then
-            MP.print("[ws] invalid message:", text)
+            MP.print("[ws] invalid message: " .. tostring(text))
             return
         end
 
@@ -361,23 +495,30 @@ function Connection:init_socket(callback)
         local json_str = string.sub(text, start)
 
         local ok, data = pcall(function()
-            return JSON.decode(json_str)
+            return json.decode(json_str)
         end)
 
         if not ok then
-            MP.print("[ws] json parse error:", json_str)
+            MP.print("[ws] json parse error: " .. tostring(json_str))
             return
         end
 
-        if key == "init" then
-            local success = data.success == true
-            if callback then
-                callback(success, data)
+        if key == "events" then
+            _self:_handle_ws_events_response(data)
+            return
+        end
+
+        local pending_callback = _self:_dequeue_ws_callback(key)
+        if pending_callback then
+            local cb_ok, cb_err = pcall(pending_callback, data)
+            if not cb_ok then
+                MP.print('[Connection] WS callback error for key ' .. tostring(key) .. ': ' .. tostring(cb_err))
             end
             return
         end
 
-        MP.print("[ws] unhandled message:", key)
+        MP.print("[ws] unhandled message: " .. tostring(key))
+        MP.print(data)
     end)
 
     function MP.update_ws()
@@ -423,9 +564,10 @@ function Connection:join_party(party_code, name, callback)
         self.player_token = response.playerToken
         self.party_code = response.partyCode
         self.party = response.party
+        self.cache = {}
         self.last_event_id = response.party and response.party.lastEventId or 0
 
-        if callback then callback(true, response) end
+        self:init_socket(callback)
     end)
 end
 
@@ -568,98 +710,19 @@ function Connection:leave_party(callback)
         self.player_id = nil
         self.player_token = nil
         self.last_event_id = 0
+        self.ws_connected = false
+        self.ws_pending = {}
+        self.cache = {}
 
         if callback then callback(ok, response) end
     end)
 end
 
-function Connection:_dispatch_event(event)
-    self:emit('raw_event', event)
-
-    if event.type == 'party_updated' then
-        self:emit('party_updated', event)
-    elseif event.type == 'match_started' then
-        self:emit('match_started', event)
-    elseif event.type == 'boss_started' then
-        self:emit('boss_started', event)
-    elseif event.type == 'boss_state_updated' then
-        self:emit('boss_state_updated', event)
-    elseif event.type == 'boss_result' then
-        self:emit('boss_result', event)
-    elseif event.type == 'next_boss_ready' then
-        self:emit('next_boss_ready', event)
-    elseif event.type == 'match_complete' then
-        self:emit('match_complete', event)
-    elseif event.type == 'card_cached' then
-        self:emit('card_cached', event)
-    end
-end
-
-function Connection:poll_events(callback)
-    if not self.party_code or not self.player_id or not self.player_token then
-        local err = { error = 'Not in a party' }
-        if callback then callback(false, err) end
-        return false, err
-    end
-
-    local path = '/party/' .. tostring(self.party_code) .. '/events?playerId='
-        .. tostring(self.player_id)
-        .. '&playerToken=' .. tostring(self.player_token)
-        .. '&since=' .. tostring(self.last_event_id or 0)
-
-    self:_request('GET', path, nil, function(ok, response)
-        if not ok then
-            self:emit('error', response)
-            if callback then callback(false, response) end
-            return
-        end
-
-        if response.party then
-            self.party = response.party
-        end
-
-        if response.events then
-            for _, event in ipairs(response.events) do
-                if event.eventId and event.eventId > (self.last_event_id or 0) then
-                    self.last_event_id = event.eventId
-                end
-                self:_dispatch_event(event)
-            end
-        end
-
-        self:emit('poll', response)
-        if callback then callback(true, response) end
-    end)
-end
-
-function Connection:_current_poll_interval()
-    if not self.party then
-        return self.config.lobby_poll_interval
-    end
-
-    local state = self.party.state
-    if state == 'BOSS_ACTIVE' then
-        return self.config.boss_active_poll_interval
-    elseif state == 'MATCH_COMPLETE' then
-        return self.config.match_complete_poll_interval
-    end
-
-    return self.config.lobby_poll_interval
-end
-
 function Connection:update(dt)
     self:_process_http_responses()
 
-    if not self.party_code or not self.player_id or not self.player_token then
-        return
-    end
-
-    local current_time = get_time()
-    local interval = self:_current_poll_interval()
-
-    if current_time - self.last_poll_at >= interval then
-        self.last_poll_at = current_time
-        self:poll_events()
+    if self.ws then
+        MP.update_ws()
     end
 end
 
