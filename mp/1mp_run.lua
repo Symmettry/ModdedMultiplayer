@@ -204,3 +204,22 @@ end
 function copy_card(...)
     return MP.modify_card(_copy_card, "copy_card", ...)
 end
+
+local set_cost_ref = Card.set_cost
+
+function Card:set_cost(...)
+    local ret = set_cost_ref(self, ...)
+
+    if MP and not MP.SINGLEPLAYER and MP.CONN then
+        local set = self.ability and self.ability.set
+        if set == 'Booster' or set == 'Voucher' or self.config and self.config.center and self.config.center.set == 'Booster' or self.config and self.config.center and self.config.center.set == 'Voucher' then
+            local key = MP.card_result('set_cost', self)
+            local cached = MP.CONN:cached(key, self)
+            if cached then
+                patch_into(self, cached)
+            end
+        end
+    end
+
+    return ret
+end
