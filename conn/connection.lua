@@ -31,12 +31,33 @@ local function big_to_net(value)
     }
 end
 
+local function is_local_endpoint(endpoint)
+    if not endpoint then return false end
+
+    -- strip protocol if user accidentally included it
+    endpoint = endpoint:gsub("^https?://", ""):gsub("^wss?://", "")
+
+    local host = endpoint:match("^[^:/]+") or endpoint
+
+    return host == "127.0.0.1" or host == "localhost"
+end
+
 local function http_base()
-    return MP.mod.config.server or "http://127.0.0.1:3001"
+    local endpoint = MP.mod.config.endpoint
+    if endpoint then
+        local protocol = is_local_endpoint(endpoint) and "http://" or "https://"
+        return protocol .. endpoint
+    end
+    return "http://127.0.0.1:3001"
 end
 
 local function ws_base()
-    return MP.mod.config.wsserver or "ws://127.0.0.1:3001"
+    local endpoint = MP.mod.config.endpoint
+    if endpoint then
+        local protocol = is_local_endpoint(endpoint) and "ws://" or "wss://"
+        return protocol .. endpoint
+    end
+    return "ws://127.0.0.1:3001"
 end
 
 local DEFAULTS = {
@@ -134,6 +155,7 @@ function Connection.new(opts)
         next_boss_ready = {},
         match_complete = {},
         raw_event = {},
+        base_hands = {},
         poll = {},
         card_cached = {},
         life_lost = {},
@@ -255,7 +277,103 @@ function Connection:_request_ws(send_key, data, response_key, callback)
     return true
 end
 
-function Connection:cached(key, ability)
+local function strip_data(value, seen)
+    local tv = type(value)
+
+    if tv == 'function' or tv == 'userdata' or tv == 'thread' then
+        return nil
+    end
+
+    if tv ~= 'table' then
+        return value
+    end
+
+    seen = seen or {}
+    if seen[value] then
+        return nil
+    end
+    seen[value] = true
+
+    local out = {}
+    for k, v in pairs(value) do
+        if type(k) ~= 'function' then
+            local sv = strip_data(v, seen)
+            if sv ~= nil then
+                out[k] = sv
+            end
+        end
+    end
+    return out
+end
+
+local function snapshot_card(card)
+    return {
+        key = card.config and card.config.center_key,
+
+        ability = strip_data(card.ability),
+        base = strip_data(card.base),
+
+        edition = strip_data(card.edition),
+
+        seal = card.seal,
+        pinned = card.pinned,
+        eternal = card.eternal,
+        perishable = card.perishable,
+        rental = card.rental,
+        debuff = card.debuff,
+
+        cost = card.cost,
+        sell_cost = card.sell_cost,
+    }
+end
+
+local function net_num(value)
+    if value == nil then
+        return 0
+    end
+
+    if Big and Big.is and Big.is(value) then
+        return big_to_net(value)
+    end
+
+    if type(value) == 'table' and value.as_table then
+        return big_to_net(value)
+    end
+
+    return tonumber(value) or 0
+end
+
+local function snapshot_base_hands(hands)
+    local out = {}
+
+    for hand_key, hand in pairs(hands or {}) do
+        out[hand_key] = {
+            chips = net_num(hand.chips),
+            mult = net_num(hand.mult),
+            l_chips = net_num(hand.l_chips),
+            l_mult = net_num(hand.l_mult),
+            s_chips = net_num(hand.s_chips),
+            s_mult = net_num(hand.s_mult),
+        }
+    end
+
+    return out
+end
+
+function Connection:send_base_hands()
+    if not self.ws or not self.ws_connected then
+        return false, { error = 'Socket not connected' }
+    end
+
+    if not G or not G.GAME or not G.GAME.hands then
+        return false, { error = 'No game hands available' }
+    end
+
+    self.ws:send('hands' .. encode_body(snapshot_base_hands(G.GAME.hands)))
+    return true
+end
+
+function Connection:cached(key, card)
     if not key then
         return nil
     end
@@ -269,38 +387,29 @@ function Connection:cached(key, ability)
         return value
     end
 
-    if not self.party_code or not self.player_id or not self.player_token then
+    if not self.ws or not self.ws_connected then
         return nil
     end
 
-    local encoded_key = tostring(key):gsub("([^%w%-_%.~])", function(c)
-        return string.format("%%%02X", string.byte(c))
-    end)
-
-    self:_request(
-        'POST',
-        '/party/' .. tostring(self.party_code) .. '/cache'
-            .. '?playerId=' .. tostring(self.player_id)
-            .. '&playerToken=' .. tostring(self.player_token)
-            .. '&key=' .. tostring(encoded_key),
-        ability,
-        function(ok, response)
-            if not ok then
-                self:emit('error', response)
-            end
+    self:_request_ws('cache', {
+        key = key,
+        card = snapshot_card(card),
+    }, 'cache', function(response)
+        if not response or response.success == false then
+            self:emit('error', response or { error = 'cache send failed' })
         end
-    )
+    end)
 
     return nil
 end
 
-function Connection:push_cached(key, ability)
-    if not key or ability == nil then
+function Connection:push_cached(key, card)
+    if not key or card == nil then
         return
     end
 
     self.cache[key] = self.cache[key] or {}
-    table.insert(self.cache[key], ability)
+    table.insert(self.cache[key], card)
 end
 
 function Connection:_process_http_responses()
@@ -386,26 +495,7 @@ function MP.update_ws() end
 
 function Connection:_dispatch_event(event)
     self:emit('raw_event', event)
-
-    if event.type == 'party_updated' then
-        self:emit('party_updated', event)
-    elseif event.type == 'match_started' then
-        self:emit('match_started', event)
-    elseif event.type == 'boss_started' then
-        self:emit('boss_started', event)
-    elseif event.type == 'boss_state_updated' then
-        self:emit('boss_state_updated', event)
-    elseif event.type == 'boss_result' then
-        self:emit('boss_result', event)
-    elseif event.type == 'next_boss_ready' then
-        self:emit('next_boss_ready', event)
-    elseif event.type == 'match_complete' then
-        self:emit('match_complete', event)
-    elseif event.type == 'card_cached' then
-        self:emit('card_cached', event)
-    elseif event.type == 'life_lost' then
-        self:emit('life_lost', event)
-    end
+    self:emit(event.type, event)
 end
 
 function Connection:_handle_ws_events_response(response)
@@ -423,8 +513,16 @@ function Connection:_handle_ws_events_response(response)
         self.last_event_id = response.party.lastEventId or self.last_event_id
     end
 
-    if response.events then
-        for _, event in ipairs(response.events) do
+    local events = nil
+
+    if response.event then
+        events = { response.event }
+    elseif response.events then
+        events = response.events
+    end
+
+    if events then
+        for _, event in ipairs(events) do
             if event.eventId and event.eventId > (self.last_event_id or 0) then
                 self.last_event_id = event.eventId
             end
@@ -507,6 +605,26 @@ function Connection:init_socket(callback)
             _self:_handle_ws_events_response(data)
             return
         end
+        if key == "party_state" then
+            if data and data.success ~= false and data.party then
+                _self.party = data.party
+                _self.last_event_id = data.party.lastEventId or _self.last_event_id
+                _self:emit('party_updated', {
+                    type = 'party_state',
+                    at = data.party.serverTime,
+                    data = {},
+                })
+                _self:emit('poll', data)
+            else
+                _self:emit('error', data)
+            end
+            return
+        end
+
+        if key == "beat" then
+            -- todo idk ping check or something
+            return
+        end
 
         local pending_callback = _self:_dequeue_ws_callback(key)
         if pending_callback then
@@ -519,6 +637,10 @@ function Connection:init_socket(callback)
 
         MP.print("[ws] unhandled message: " .. tostring(key))
         MP.print(data)
+    end)
+
+    ws:on("close", function()
+        MP.print("[ws] socket closed")
     end)
 
     function MP.update_ws()
@@ -718,11 +840,18 @@ function Connection:leave_party(callback)
     end)
 end
 
+local _timeSinceBeat = 0
 function Connection:update(dt)
     self:_process_http_responses()
 
     if self.ws then
         MP.update_ws()
+
+        _timeSinceBeat = _timeSinceBeat + dt
+        if _timeSinceBeat > 3 then
+            self.ws:send("beat{}")
+            _timeSinceBeat = _timeSinceBeat - 3
+        end
     end
 end
 

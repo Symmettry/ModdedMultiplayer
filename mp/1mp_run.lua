@@ -55,28 +55,6 @@ function MP.try_launch_party_run()
     G.GAME.lives = 4
 end
 
-function MP.refresh_party_menu()
-    if not (MP and MP.CONN and MP.CONN.party_code) then return end
-    if MP._refresh_in_flight then return end
-
-    MP._refresh_in_flight = true
-
-    MP.CONN:get_party_state(function(ok, response)
-        MP._refresh_in_flight = false
-
-        if not ok then
-            MP.UI.status = tostring((response and response.error) or 'Failed to refresh party')
-            return
-        end
-
-        MP.try_launch_party_run()
-
-        if G.OVERLAY_MENU and not MP.launching_run then
-            MP.open_overlay(create_UIBox_online_party_menu())
-        end
-    end)
-end
-
 function MP.force_end_round()
     MP._forced_end_round = true
 
@@ -126,6 +104,12 @@ function MP.on_boss_failed_round()
     MP.UI.status = 'Waiting for opponent to finish boss'
 end
 
+function MP.send_base_hands()
+    if MP.CONN then
+        MP.CONN:send_base_hands()
+    end
+end
+
 local game_update_ref = Game.update
 function Game:update(dt)
     MP.update_ws()
@@ -154,15 +138,6 @@ function Game:update(dt)
 
     if MP and MP.CONN and MP.CONN.party_code then
         MP.try_launch_party_run()
-
-        MP.party_refresh_timer = (MP.party_refresh_timer or 0) + dt
-        if MP.party_refresh_timer >= (MP.party_refresh_interval or 1.0) then
-            MP.party_refresh_timer = 0
-
-            if G.OVERLAY_MENU and not MP.UI.selecting_lobby_options and not MP.launching_run then
-                MP.refresh_party_menu()
-            end
-        end
     else
         if MP then
             MP.party_refresh_timer = 0
@@ -198,15 +173,25 @@ function MP.card_result(tag, card)
     return key
 end
 
+local function patch_into(dst, src)
+    for k, v in pairs(src) do
+        if type(v) == 'table' then
+            if type(dst[k]) ~= 'table' then
+                dst[k] = {}
+            end
+            patch_into(dst[k], v)
+        else
+            dst[k] = v
+        end
+    end
+end
 function MP.modify_card(fn, tag, ...)
     local card = fn(...)
     if MP and not MP.SINGLEPLAYER then
         local key = MP.card_result(tag, card)
-        local cached = MP.CONN:cached(key, card.ability)
+        local cached = MP.CONN:cached(key, card)
         if cached then
-            for k, v in pairs(cached) do
-                card.ability[k] = v
-            end
+            patch_into(card, cached)
         end
     end
     return card
