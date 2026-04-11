@@ -1,6 +1,7 @@
 local http = require('socket.http')
 local ltn12 = require('ltn12')
 local json = require('json')
+local Socket = LOAD("conn/socket.lua")
 
 Connection = {}
 Connection.__index = Connection
@@ -32,6 +33,9 @@ end
 
 local function http_base()
     return MP.mod.config.server or "http://127.0.0.1:3001"
+end
+local function ws_base()
+    return MP.mod.config.wsserver or "ws://127.0.0.1:3001"
 end
 
 local DEFAULTS = {
@@ -112,6 +116,7 @@ function Connection.new(opts)
     self.player_token = nil
     self.party_code = nil
     self.party = nil
+    self.ws = nil
     self.cache = {}
 
     self.last_event_id = 0
@@ -318,6 +323,68 @@ local function get_all_mods()
     return result
 end
 
+function MP.update_ws() end
+function Connection:init_socket(callback)
+    local ws = Socket.connect(MP.mod, "ws://localhost:3001")
+    local _self = self
+
+    self.ws = ws
+
+    MP.update_ws = function()
+        ws:update()
+    end
+
+    ws:on("error", function(self, ev)
+        MP.print("[ws] error", ev.message)
+    end)
+
+    ws:on("open", function(self, ev)
+        ws:send(
+            'init{"party":"' .. _self.party_code ..
+            '","player_id":"' .. _self.player_id ..
+            '","player_token":"' .. _self.player_token .. '"}'
+        )
+    end)
+
+    ws:on("message", function(self, ev)
+        local text = ev.data or ev
+
+        if not text then return end
+
+        local start = string.find(text, "{", 1, true)
+        if not start then
+            MP.print("[ws] invalid message:", text)
+            return
+        end
+
+        local key = string.sub(text, 1, start - 1)
+        local json_str = string.sub(text, start)
+
+        local ok, data = pcall(function()
+            return JSON.decode(json_str)
+        end)
+
+        if not ok then
+            MP.print("[ws] json parse error:", json_str)
+            return
+        end
+
+        if key == "init" then
+            local success = data.success == true
+            if callback then
+                callback(success, data)
+            end
+            return
+        end
+
+        MP.print("[ws] unhandled message:", key)
+    end)
+
+    function MP.update_ws()
+        ws:update()
+    end
+end
+
 function Connection:create_party(name, callback)
     self:_request('POST', '/party/create', {
         name = name,
@@ -333,9 +400,10 @@ function Connection:create_party(name, callback)
         self.player_token = response.playerToken
         self.party_code = response.partyCode
         self.party = response.party
+        self.cache = {}
         self.last_event_id = response.party and response.party.lastEventId or 0
 
-        if callback then callback(true, response) end
+        self:init_socket(callback)
     end)
 end
 

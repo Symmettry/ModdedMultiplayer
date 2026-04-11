@@ -4,6 +4,8 @@ mod.config = mod.config or {}
 mod.config.server = tostring(mod.config.server or "http://127.0.0.1:3001")
 
 mod.config_tab = function()
+    print(mod)
+
     return {
         n = G.UIT.ROOT,
         config = {align = "cm", padding = 0.1, colour = G.C.CLEAR},

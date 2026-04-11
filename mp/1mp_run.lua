@@ -128,6 +128,8 @@ end
 
 local game_update_ref = Game.update
 function Game:update(dt)
+    MP.update_ws()
+
     local ret = game_update_ref(self, dt)
 
     if MP and MP._returning_to_party then
