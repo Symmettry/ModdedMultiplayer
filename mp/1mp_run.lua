@@ -5,7 +5,6 @@ function MP.try_launch_party_run()
     if MP.launching_run then return end
 
     local state = MP.party_state()
-
     if state ~= 'RUNNING_TO_BOSS' and state ~= 'BOSS_ACTIVE' then
         return
     end
@@ -15,8 +14,6 @@ function MP.try_launch_party_run()
     local stake_value = MP.party_stake()
     local seed = MP.party_seed()
 
-    MP.print('launch deck=' .. tostring(deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
-
     if not match_id or not deck_name or stake_value == nil or not seed then
         return
     end
@@ -25,34 +22,53 @@ function MP.try_launch_party_run()
         return
     end
 
-    MP.started_match_id = match_id
     MP.launching_run = true
     G.SETTINGS.paused = false
 
     local deck_center = G.P_CENTERS and G.P_CENTERS[deck_name] or nil
     local launch_deck_name = (deck_center and deck_center.name) or deck_name
 
-    MP.print('launch deck_key=' .. tostring(deck_name) .. ' deck_name=' .. tostring(launch_deck_name) .. ' stake=' .. tostring(stake_value) .. ' seed=' .. tostring(seed))
+    G.E_MANAGER:add_event(Event({
+        trigger = 'after',
+        delay = 0,
+        blocking = false,
+        func = function()
+            if G.STAGE == G.STAGES.MAIN_MENU then
+                G:delete_run()
+            else
+                if G.OVERLAY_MENU then
+                    G.OVERLAY_MENU:remove()
+                    G.OVERLAY_MENU = nil
+                end
+            end
 
-    if G.STAGE == G.STAGES.MAIN_MENU then
-        G:delete_run()
-    else
-        if G.OVERLAY_MENU then
-            G.OVERLAY_MENU:remove()
-            G.OVERLAY_MENU = nil
+            G:start_run({
+                deck = {
+                    name = launch_deck_name,
+                    key = deck_name,
+                },
+                stake = stake_value,
+                seed = seed,
+            })
+
+            MP.started_match_id = match_id
+
+            G.E_MANAGER:add_event(Event({
+                trigger = 'after',
+                delay = 0,
+                blocking = false,
+                func = function()
+                    if G and G.GAME then
+                        G.GAME.lives = 4
+                    end
+                    MP.launching_run = false
+                    return true
+                end
+            }))
+
+            return true
         end
-    end
-
-    G:start_run({
-        deck = {
-            name = launch_deck_name,
-            key = deck_name,
-        },
-        stake = stake_value,
-        seed = seed,
-    })
-
-    G.GAME.lives = 4
+    }))
 end
 
 function MP.force_end_round()

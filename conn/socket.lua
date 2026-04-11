@@ -1,5 +1,8 @@
+local JSON = LOAD("conn/json.lua")
+
 local Socket = {}
 Socket.__index = Socket
+Socket.JSON = JSON
 
 local _module = nil
 
@@ -80,8 +83,33 @@ function Socket:on(event, fn)
     return self
 end
 
-function Socket:send(data)
-    return self.raw:send(data)
+function Socket:send(data, is_binary)
+    return self.raw:send(data, is_binary or false)
+end
+
+local unpack = unpack or table.unpack
+
+local function bytes_to_string(bytes)
+    local chunks = {}
+    local chunk_size = 1024
+
+    for i = 1, #bytes, chunk_size do
+        local sub = {}
+        for j = i, math.min(i + chunk_size - 1, #bytes) do
+            sub[#sub + 1] = bytes[j]
+        end
+        chunks[#chunks + 1] = string.char(unpack(sub))
+    end
+
+    return table.concat(chunks)
+end
+
+function Socket:emit(key, tbl)
+    local payload = JSON.compressJSON({
+        key = key,
+        data = tbl
+    })
+    return self:send(bytes_to_string(payload), true)
 end
 
 function Socket:close(code, reason)
