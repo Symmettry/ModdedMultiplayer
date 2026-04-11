@@ -24,6 +24,7 @@ end
 
 local function load_ws_native(mod)
     if _module then
+        MP.print("[ws] returning cached native module")
         return _module
     end
 
@@ -33,7 +34,6 @@ local function load_ws_native(mod)
     local os_name = love.system.getOS()
 
     local candidates = {}
-
     if os_name == "Windows" then
         candidates = {
             join_path(base, "ws_native.dll"),
@@ -47,12 +47,20 @@ local function load_ws_native(mod)
     local last_err = "no candidate paths tried"
 
     for _, lib_path in ipairs(candidates) do
+        MP.print("[ws] trying native module: " .. tostring(lib_path))
+
         if file_exists(lib_path) then
+            MP.print("[ws] file exists")
             local openf, err = package.loadlib(lib_path, "luaopen_ws_native")
+            MP.print("[ws] package.loadlib returned", openf, err)
+
             if openf then
+                MP.print("[ws] calling luaopen_ws_native")
                 _module = openf()
+                MP.print("[ws] native module initialized")
                 return _module
             end
+
             last_err = err or ("failed to load " .. lib_path)
         else
             last_err = "missing library: " .. lib_path
