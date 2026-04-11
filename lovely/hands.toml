@@ -1,0 +1,20 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+[[patches]]
+[patches.pattern]
+target = "game.lua"
+pattern = '''
+    if not self.GAME.round_resets.blind_tags then
+        self.GAME.round_resets.blind_tags = {}
+    end
+'''
+position = "after"
+payload = '''
+if MP and not MP.SINGLEPLAYER and MP.is_host() then
+    MP.send_base_hands()
+end
+'''
+match_indent = true
