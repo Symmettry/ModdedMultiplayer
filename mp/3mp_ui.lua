@@ -45,10 +45,34 @@ G.FUNCS.online_copy_party_code = function()
         MP.UI.status = "Clipboard not supported"
     end
 
-    MP.open_overlay(create_UIBox_online_party_menu())
+    MP.open_overlay(create_UIBox_online_party_menu("copy party code?"))
 end
 
-function create_UIBox_online_party_menu()
+function MP.get_localized_stakedeck(deck_key, stake_id)
+    local selected_deck = deck_key
+        and localize({
+            type = 'name_text',
+            set = 'Back',
+            key = deck_key
+        })
+        or '(unset)'
+
+    local stake_obj = G.P_CENTER_POOLS
+        and G.P_CENTER_POOLS.Stake
+        and stake_id
+        and G.P_CENTER_POOLS.Stake[stake_id+0] -- trust
+
+    local selected_stake = (stake_obj and stake_obj.key)
+        and localize({
+            type = 'name_text',
+            set = 'Stake',
+            key = stake_obj.key
+        })
+        or '(unset)'
+    return selected_deck, selected_stake
+end
+
+function create_UIBox_online_party_menu(debug)
     MP.SINGLEPLAYER = false
 
     local party = MP.CONN and MP.CONN.party or nil
@@ -85,8 +109,10 @@ function create_UIBox_online_party_menu()
         }},
     }
 
-    local selected_deck = (party and party.config and party.config.deck) or '(unset)'
-    local selected_stake = (party and party.config and party.config.stake) or '(unset)'
+    local deck_key = party and party.config and party.config.deck
+    local stake_id = party and party.config and party.config.stake
+
+    local selected_deck, selected_stake = MP.get_localized_stakedeck(deck_key, stake_id)
 
     contents[#contents+1] = {n=G.UIT.R, config={align="cm", padding=0.03}, nodes={
         {n=G.UIT.T, config={text = "DECK: " .. tostring(selected_deck), scale = 0.30, colour = G.C.UI.TEXT_LIGHT, shadow = true}}
@@ -322,7 +348,7 @@ G.FUNCS.online_submit_join_party = function()
         end
 
         MP.UI.status = 'Joined party'
-        MP.open_overlay(create_UIBox_online_party_menu())
+        MP.open_overlay(create_UIBox_online_party_menu("joined party"))
     end)
 end
 
@@ -343,7 +369,7 @@ G.FUNCS.online_create_party = function()
                 MP.UI.status = 'Created party'
             end
 
-            MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu("created party"))
         end)
     end)
 end
@@ -377,7 +403,7 @@ G.FUNCS.online_start_match = function()
     MP.CONN:start_match(function(ok, response)
         if not ok then
             MP.UI.status = tostring((response and response.error) or 'Failed to start match')
-            MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu("failed to start match"))
             return
         end
 
@@ -386,7 +412,7 @@ G.FUNCS.online_start_match = function()
         MP.try_launch_party_run()
 
         if not MP.launching_run then
-            MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu("starting match"))
         end
     end)
 end
@@ -416,7 +442,7 @@ G.FUNCS.online_toggle_ready = function()
             MP.UI.status = new_ready and 'Ready' or 'Not ready'
         end
 
-        MP.open_overlay(create_UIBox_online_party_menu())
+        MP.open_overlay(create_UIBox_online_party_menu("readying"))
     end)
 end
 

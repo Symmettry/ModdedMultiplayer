@@ -73,10 +73,13 @@ end
 
 function MP.force_end_round()
     MP._forced_end_round = true
+    
+    if G.GAME.blind then
+        G.GAME.blind.chips = -math.huge
+    end
 
     MP.print('Forcing end_round()')
 
-    G.GAME.chips = G.GAME.blind.chips
     G.STATE = G.STATES.HAND_PLAYED
     G.STATE_COMPLETE = true
     end_round(true)
@@ -144,7 +147,7 @@ function Game:update(dt)
                 G.OVERLAY_MENU = nil
             end
 
-            MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu("returning to party"))
         end
     end
 
@@ -164,14 +167,15 @@ function Game:update(dt)
 
     if MP and not MP.SINGLEPLAYER and G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante >= 2 and G.GAME.blind and G.GAME.blind.boss then
         local enemy = MP.my_enemy()
-        G.GAME.blind.chip_text = enemy.runtime.scoreFormatted or enemy.runtime.score or "0"
+        if enemy then
+            G.GAME.blind.chip_text = enemy.runtime.scoreFormatted or enemy.runtime.score or "0"
+        end
     end
 
     return ret
 end
 
 local _create_card = create_card
-local _copy_card = copy_card
 
 function MP.card_result(tag, card)
     if not card then
@@ -202,7 +206,7 @@ local function patch_into(dst, src)
     end
 end
 function MP.modify_card(fn, tag, ...)
-    local card = fn(...)
+    local card = fn(...) 
     if MP and not MP.SINGLEPLAYER then
         local key = MP.card_result(tag, card)
         local cached = MP.CONN:cached(key, card)
@@ -215,10 +219,6 @@ end
 
 function create_card(...)
     return MP.modify_card(_create_card, "create_card", ...)
-end
-
-function copy_card(...)
-    return MP.modify_card(_copy_card, "copy_card", ...)
 end
 
 local set_cost_ref = Card.set_cost

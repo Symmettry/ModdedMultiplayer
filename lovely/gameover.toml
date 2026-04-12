@@ -50,7 +50,6 @@ if game_over then
                 G.FILE_HANDLER.force = true
                 G.STATE_COMPLETE = false
             else
-                G.GAME.blind.chips = 1
                 MP.force_end_round()
                 return
             end

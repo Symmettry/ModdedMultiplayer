@@ -109,7 +109,8 @@ local function mp_capture_setup_and_return_to_party()
             if not ok then
                 MP.UI.status = tostring((response and response.error) or 'Failed to set deck/stake')
             else
-                MP.UI.status = 'Selected ' .. tostring(deck_name) .. ' / Stake ' .. tostring(stake)
+                local selected_deck, selected_stake = MP.get_localized_stakedeck(deck_name, stake)
+                MP.UI.status = 'Selected ' .. tostring(selected_deck) .. ' / ' .. tostring(selected_stake)
             end
 
             MP.UI.selecting_lobby_options = false
@@ -126,7 +127,7 @@ local function mp_capture_setup_and_return_to_party()
                 blockable = false,
                 blocking = false,
                 func = function()
-                    MP.open_overlay(create_UIBox_online_party_menu())
+                    MP.open_overlay(create_UIBox_online_party_menu("selected lobby options"))
                     return true
                 end
             }))
@@ -220,5 +221,5 @@ G.FUNCS.online_return_to_party_menu = function()
         G.OVERLAY_MENU = nil
     end
 
-    MP.open_overlay(create_UIBox_online_party_menu())
+    MP.open_overlay(create_UIBox_online_party_menu("return to party menu 2"))
 end

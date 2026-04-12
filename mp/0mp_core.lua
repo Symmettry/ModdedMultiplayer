@@ -37,6 +37,7 @@ function MP.close_overlay()
 end
 
 function MP.open_overlay(definition)
+    if MP.UI.selecting_lobby_options then return end
     MP.close_overlay()
     G.OVERLAY_MENU = UIBox{
         definition = definition,

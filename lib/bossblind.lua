@@ -20,7 +20,7 @@ SMODS.Blind{
     },
 
     calculate = function(self)
-        if G.GAME.blind.chips ~= 1 then G.GAME.blind.chips = math.huge end
+        if G.GAME.blind.chips ~= -math.huge then G.GAME.blind.chips = math.huge end
         
         if not MP or not MP.CONN or not MP.CONN.party then return end
         if MP.party_state and MP.party_state() ~= 'BOSS_ACTIVE' then return end
@@ -91,7 +91,7 @@ SMODS.Blind{
 
     loc_vars = function(self)
         local enemy = MP.my_enemy()
-        if G and G.GAME and G.GAME.blind then
+        if enemy and G and G.GAME and G.GAME.blind then
             local name = enemy and enemy.name or "Opponent"
             G.GAME.blind.name = name
             G.GAME.blind.loc_name = name

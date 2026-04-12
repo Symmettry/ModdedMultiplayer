@@ -99,7 +99,7 @@ local unpack = unpack or table.unpack
 
 local function bytes_to_string(bytes)
     local chunks = {}
-    local chunk_size = 1024
+    local chunk_size = 4096
 
     for i = 1, #bytes, chunk_size do
         local sub = {}

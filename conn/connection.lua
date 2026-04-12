@@ -583,7 +583,15 @@ function Connection:init_socket(callback)
         end
 
         local ok, packet = pcall(function()
-            return Socket.JSON.decompressJSON({string.byte(raw, 1, #raw)})
+            local function bytes_from_string(raw)
+                local t = {}
+                for i = 1, #raw do
+                    t[i] = string.byte(raw, i)
+                end
+                return t
+            end
+
+            return Socket.JSON.decompressJSON(bytes_from_string(raw))
         end)
 
         if not ok or type(packet) ~= "table" then

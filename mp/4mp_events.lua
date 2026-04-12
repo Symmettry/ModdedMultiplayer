@@ -159,10 +159,6 @@ function MP.listeners()
 
         MP.print('loser lives now ' .. tostring(data.loserLives))
 
-        if G and G.GAME and G.GAME.blind then
-            G.GAME.blind.chips = 1
-        end
-
         MP.force_end_round()
         MP._boss_state_dirty = true
     end)
@@ -246,7 +242,7 @@ function MP.listeners()
 
     register_once('_party_updated_overlay_handler_registered', 'party_updated', function()
         if G.OVERLAY_MENU and not MP.launching_run then
-            MP.open_overlay(create_UIBox_online_party_menu())
+            MP.open_overlay(create_UIBox_online_party_menu("party updated overlay handler registered"))
         end
     end)
 end
