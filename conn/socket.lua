@@ -114,8 +114,8 @@ end
 
 function Socket:emit(key, tbl)
     local payload = JSON.compressJSON({
-        key = key,
-        data = tbl
+        key,
+        tbl
     })
     return self:send(bytes_to_string(payload), true)
 end

@@ -1,6 +1,6 @@
 MP = MP or {}
 
-local debug = true
+local debug = false
 function MP.print(...)
     if not debug then return end
     return print("[MP] ", ...)

@@ -599,8 +599,8 @@ function Connection:init_socket(callback)
             return
         end
 
-        local key = packet.key
-        local data = packet.data
+        local key = packet[1]
+        local data = packet[2]
 
         if not key then
             MP.print("[ws] missing packet key")
