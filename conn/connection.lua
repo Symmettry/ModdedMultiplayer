@@ -108,6 +108,112 @@ local function normalize_party_code(code)
     return tostring(code):upper()
 end
 
+local PARTY_SNAPSHOT = {
+    PARTY_CODE = 1,
+    MATCH_ID = 2,
+    STATE = 3,
+    SEED = 4,
+    WINNER_PLAYER_ID = 5,
+    RESULT_REASON = 6,
+    UPDATED_AT = 7,
+    LAST_EVENT_ID = 8,
+    CONFIG = 9,
+    PLAYERS = 10,
+    SERVER_TIME = 11,
+}
+local PLAYER_SNAPSHOT = {
+    PLAYER_ID = 1,
+    NAME = 2,
+    IS_HOST = 3,
+    CONNECTED = 4,
+    READY = 5,
+    IN_RUN = 6,
+    BOSS_READY = 7,
+    FINISHED_BOSS = 8,
+    LIVES = 9,
+    RUNTIME = 10,
+    YOU = 11,
+}
+local PLAYER_RUNTIME_SNAPSHOT = {
+    ANTE = 1,
+    SCORE = 2,
+    SCORE_FORMATTED = 3,
+    HANDS_USED = 4,
+    HANDS_REMAINING = 5,
+    MONEY = 6,
+    MONEY_FORMATTED = 7,
+    SUBMITTED_AT = 8,
+    FINISHED_AT = 9,
+}
+
+local function looks_like_party_snapshot(t)
+    return type(t) == "table"
+        and t.partyCode == nil
+        and t[PARTY_SNAPSHOT.PARTY_CODE] ~= nil
+        and t[PARTY_SNAPSHOT.STATE] ~= nil
+        and t[PARTY_SNAPSHOT.CONFIG] ~= nil
+        and t[PARTY_SNAPSHOT.PLAYERS] ~= nil
+end
+
+local function decode_party_snapshot(party)
+    if not looks_like_party_snapshot(party) then
+        return party
+    end
+
+    local raw_players = party[PARTY_SNAPSHOT.PLAYERS] or {}
+    local players = {}
+
+    for i = 1, #raw_players do
+        local p = raw_players[i]
+        local runtime = p[10] or {}
+
+        players[i] = {
+            playerId = p[1],
+            name = p[2],
+            isHost = p[3],
+            connected = p[4],
+            ready = p[5],
+            inRun = p[6],
+            bossReady = p[7],
+            finishedBoss = p[8],
+            lives = p[9],
+            runtime = {
+                ante = runtime[1],
+                score = runtime[2],
+                scoreFormatted = runtime[3],
+                handsUsed = runtime[4],
+                handsRemaining = runtime[5],
+                money = runtime[6],
+                moneyFormatted = runtime[7],
+                submittedAt = runtime[8],
+                finishedAt = runtime[9],
+            },
+            you = p[11],
+        }
+    end
+
+    return {
+        partyCode = party[PARTY_SNAPSHOT.PARTY_CODE],
+        matchId = party[PARTY_SNAPSHOT.MATCH_ID],
+        state = party[PARTY_SNAPSHOT.STATE],
+        seed = party[PARTY_SNAPSHOT.SEED],
+        winnerPlayerId = party[PARTY_SNAPSHOT.WINNER_PLAYER_ID],
+        resultReason = party[PARTY_SNAPSHOT.RESULT_REASON],
+        updatedAt = party[PARTY_SNAPSHOT.UPDATED_AT],
+        lastEventId = party[PARTY_SNAPSHOT.LAST_EVENT_ID],
+        config = party[PARTY_SNAPSHOT.CONFIG],
+        players = players,
+        serverTime = party[PARTY_SNAPSHOT.SERVER_TIME],
+    }
+end
+
+local function normalize_party_in_payload(payload)
+    if type(payload) == "table" and payload.party ~= nil then
+        payload.party = decode_party_snapshot(payload.party)
+    end
+    return payload
+end
+
 local function safe_call(fn, ...)
     local ok, result1, result2, result3 = pcall(fn, ...)
     if not ok then
@@ -187,43 +293,67 @@ function Connection:emit(event_name, payload)
         end
     end
 end
-
-local function next_request_id()
-    MP.HTTP._next_request_id = (MP.HTTP._next_request_id or 0) + 1
-    return MP.HTTP._next_request_id
-end
-
 function Connection:_request(method, path, body, callback)
-    local request_id = next_request_id()
+    local response_chunks = {}
     local body_string = method == 'GET' and nil or encode_body(body)
 
-    MP.HTTP.pending = MP.HTTP.pending or {}
+    local headers = {}
+    if method ~= 'GET' then
+        headers["Content-Type"] = "application/json"
+        headers["Content-Length"] = tostring(#body_string)
+    end
 
-    MP.HTTP.pending[request_id] = {
-        callback = callback,
+    http.TIMEOUT = self.config.request_timeout or 5
+
+    local req = {
+        url = http_base() .. path,
         method = method,
-        path = path,
+        sink = ltn12.sink.table(response_chunks),
+        headers = next(headers) and headers or nil,
     }
 
-    local headers = nil
-    if method ~= 'GET' then
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["Content-Length"] = tostring(#body_string),
+    if body_string then
+        req.source = ltn12.source.string(body_string)
+    end
+
+    local ok, request_ok, status_code, response_headers, status_line =
+        pcall(http.request, req)
+
+    local response = {
+        ok = ok and request_ok ~= nil,
+        request_ok = request_ok,
+        status_code = tonumber(status_code) or 0,
+        headers = response_headers or {},
+        status_line = status_line or '',
+        body = table.concat(response_chunks),
+    }
+
+    local cb_ok
+    local payload
+
+    if ok and tonumber(status_code) and tonumber(status_code) >= 200 and tonumber(status_code) < 300 then
+        cb_ok = true
+        payload = normalize_party_in_payload(decode_body(response.body) or {})
+    else
+        local decoded = normalize_party_in_payload(decode_body(response.body) or {})
+        cb_ok = false
+        payload = {
+            status_code = response.status_code,
+            headers = response.headers,
+            status_line = response.status_line,
+            body = decoded,
+            error = (not ok and request_ok) or response.error or decoded.error or ('HTTP ' .. tostring(response.status_code)),
         }
     end
 
-    MP.HTTP.out_channel:push({
-        type = "request",
-        requestId = request_id,
-        url = http_base() .. path,
-        method = method,
-        headers = headers,
-        body = body_string,
-        timeout = self.config.request_timeout,
-    })
+    if callback then
+        local ok_cb, err = pcall(callback, cb_ok, payload, response)
+        if not ok_cb then
+            MP.print('[Connection] HTTP callback error: ' .. tostring(err))
+        end
+    end
 
-    return request_id
+    return cb_ok, payload, response
 end
 
 function Connection:_enqueue_ws_callback(response_key, callback)
@@ -412,45 +542,6 @@ function Connection:push_cached(key, card)
     table.insert(self.cache[key], card)
 end
 
-function Connection:_process_http_responses()
-    MP.HTTP.pending = MP.HTTP.pending or {}
-
-    while true do
-        local response = MP.HTTP.in_channel:pop()
-        if not response then
-            break
-        end
-
-        local pending = MP.HTTP.pending[response.requestId]
-        MP.HTTP.pending[response.requestId] = nil
-
-        if pending and pending.callback then
-            local ok_result
-            local payload
-
-            if response.ok and tonumber(response.status_code) and tonumber(response.status_code) >= 200 and tonumber(response.status_code) < 300 then
-                ok_result = true
-                payload = decode_body(response.body) or {}
-            else
-                local decoded = decode_body(response.body) or {}
-                ok_result = false
-                payload = {
-                    status_code = response.status_code,
-                    headers = response.headers or {},
-                    status_line = response.status_line or '',
-                    body = decoded,
-                    error = response.error or decoded.error or ('HTTP ' .. tostring(response.status_code)),
-                }
-            end
-
-            local ok, err = pcall(pending.callback, ok_result, payload, response)
-            if not ok then
-                MP.print('[Connection] HTTP callback error: ' .. tostring(err))
-            end
-        end
-    end
-end
-
 function Connection:_auth_body(extra)
     local body = extra or {}
     body.partyCode = self.party_code
@@ -601,6 +692,8 @@ function Connection:init_socket(callback)
 
         local key = packet[1]
         local data = packet[2]
+
+        data = normalize_party_in_payload(data)
 
         if not key then
             MP.print("[ws] missing packet key")
@@ -953,8 +1046,6 @@ end
 
 local _timeSinceBeat = 0
 function Connection:update(dt)
-    self:_process_http_responses()
-
     if self.ws then
         MP.update_ws()
 
