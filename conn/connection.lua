@@ -729,36 +729,58 @@ function Connection:set_ready(ready, callback)
         return false, err
     end
 
-    self:_request('POST', '/party/ready', self:_auth_body({
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    self:_request_ws('ready', {
         ready = ready and true or false,
-    }), function(ok, response)
-        if ok and response and response.party then
+    }, 'ready', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
             self.party = response.party
             self.last_event_id = response.party.lastEventId or self.last_event_id
         else
-            self:emit('error', response)
+            self:emit('error', response or { error = 'ready send failed' })
         end
 
-        if callback then callback(ok, response) end
+        if callback then
+            callback(ok, response)
+        end
     end)
+
+    return true
 end
 
 function Connection:start_match(callback)
-    if not self.party_code or not self.player_id or not self.player_token then
+    if not self.party_code or not self.player_id then
         local err = { error = 'Not in a party' }
         if callback then callback(false, err) end
         return false, err
     end
 
-    self:_request('POST', '/party/start', self:_auth_body(), function(ok, response)
-        if ok and response and response.party then
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    return self:_request_ws('start', {}, 'start', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
             self.party = response.party
             self.last_event_id = response.party.lastEventId or self.last_event_id
         else
-            self:emit('error', response)
+            self:emit('error', response or { error = 'start send failed' })
         end
 
-        if callback then callback(ok, response) end
+        if callback then
+            callback(ok, response)
+        end
     end)
 end
 
@@ -783,12 +805,34 @@ function Connection:get_party_state(callback)
     end)
 end
 
-function Connection:signal_boss_ready(callback)
-    self:_request('POST', '/match/boss_ready', self:_auth_body(), function(ok, response)
-        if not ok then
-            self:emit('error', response)
+function Connection:signal_boss_ready(ante, callback)
+    if not self.party_code or not self.player_id then
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    return self:_request_ws('boss_ready', {
+        ante = ante,
+    }, 'boss_ready', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response or { error = 'boss_ready send failed' })
         end
-        if callback then callback(ok, response) end
+
+        if callback then
+            callback(ok, response)
+        end
     end)
 end
 
@@ -814,24 +858,52 @@ function Connection:send_boss_state(score, hands_used, hands_remaining, money, d
 end
 
 function Connection:take_life(callback)
-    self:_request('POST', '/match/take_life', self:_auth_body(), function(ok, response)
-        if not ok then
-            self:emit('error', response)
-        end
-        if callback then callback(ok, response) end
-    end)
-end
-
-function Connection:leave_party(callback)
-    if not self.party_code or not self.player_id or not self.player_token then
+    if not self.party_code or not self.player_id then
         local err = { error = 'Not in a party' }
         if callback then callback(false, err) end
         return false, err
     end
 
-    self:_request('POST', '/party/leave', self:_auth_body(), function(ok, response)
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    return self:_request_ws('take_life', {}, 'take_life', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response or { error = 'take_life send failed' })
+        end
+
+        if callback then
+            callback(ok, response)
+        end
+    end)
+end
+
+function Connection:leave_party(callback)
+    if not self.party_code or not self.player_id then
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    return self:_request_ws('leave', {}, 'leave', function(response)
+        local ok = response and response.success == true
+
         if not ok then
-            self:emit('error', response)
+            self:emit('error', response or { error = 'leave send failed' })
         end
 
         self.party = nil
@@ -843,7 +915,9 @@ function Connection:leave_party(callback)
         self.ws_pending = {}
         self.cache = {}
 
-        if callback then callback(ok, response) end
+        if callback then
+            callback(ok, response)
+        end
     end)
 end
 

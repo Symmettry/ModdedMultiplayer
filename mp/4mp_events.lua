@@ -23,7 +23,7 @@ function MP.set_boss_ready(callback)
         return true, res
     end
 
-    MP.CONN:signal_boss_ready(function(ok, response)
+    MP.CONN:signal_boss_ready(G.GAME.round_resets.ante, function(ok, response)
         if not ok then
             MP.UI = MP.UI or {}
             MP.UI.status = tostring((response and response.error) or 'Failed to ready for boss')
@@ -244,5 +244,9 @@ function MP.listeners()
         if G.OVERLAY_MENU and not MP.launching_run then
             MP.open_overlay(create_UIBox_online_party_menu("party updated overlay handler registered"))
         end
+    end)
+
+    register_once('_error_ws', 'error', function(err)
+        print("Error: ", err)
     end)
 end
