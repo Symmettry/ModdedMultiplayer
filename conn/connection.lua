@@ -701,24 +701,34 @@ function Connection:join_party(party_code, name, callback)
 end
 
 function Connection:select_lobby_options(deck, stake, callback)
-    if not self.party_code or not self.player_id or not self.player_token then
+    if not self.party_code or not self.player_id then
         local err = { error = 'Not in a party' }
         if callback then callback(false, err) end
         return false, err
     end
 
-    self:_request('POST', '/party/select', self:_auth_body({
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    return self:_request_ws('select', {
         deck = deck,
         stake = stake,
-    }), function(ok, response)
-        if ok and response and response.party then
+    }, 'select', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
             self.party = response.party
             self.last_event_id = response.party.lastEventId or self.last_event_id
         else
-            self:emit('error', response)
+            self:emit('error', response or { error = 'select send failed' })
         end
 
-        if callback then callback(ok, response) end
+        if callback then
+            callback(ok, response)
+        end
     end)
 end
 
@@ -837,10 +847,22 @@ function Connection:signal_boss_ready(ante, callback)
 end
 
 function Connection:send_boss_state(score, hands_used, hands_remaining, money, done, ante, callback)
+    if not self.party_code or not self.player_id then
+        local err = { error = 'Not in a party' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
+    if not self.ws or not self.ws_connected then
+        local err = { error = 'Socket not connected' }
+        if callback then callback(false, err) end
+        return false, err
+    end
+
     local big_score = to_big(score)
     local big_money = to_big(money)
 
-    self:_request('POST', '/match/report_state', self:_auth_body({
+    return self:_request_ws('report_state', {
         score = big_to_net(big_score),
         scoreFormatted = number_format(big_score),
         handsUsed = to_number(hands_used),
@@ -849,11 +871,19 @@ function Connection:send_boss_state(score, hands_used, hands_remaining, money, d
         moneyFormatted = number_format(big_money),
         done = done and true or false,
         ante = to_number(ante),
-    }), function(ok, response)
-        if not ok then
-            self:emit('error', response)
+    }, 'report_state', function(response)
+        local ok = response and response.success == true
+
+        if ok and response.party then
+            self.party = response.party
+            self.last_event_id = response.party.lastEventId or self.last_event_id
+        else
+            self:emit('error', response or { error = 'report_state send failed' })
         end
-        if callback then callback(ok, response) end
+
+        if callback then
+            callback(ok, response)
+        end
     end)
 end
 
